@@ -366,3 +366,48 @@ Schell, J. 2008. *The Art of Game Design: A Book of Lenses*. 1st ed. Burlington:
 Nystrom, R. 2014. *Game Programming Patterns*. [Online]. Available at: https://gameprogrammingpatterns.com [Accessed 25 March 2026].
 
 Rogers, S. 2014. *Level Up! The Guide to Great Video Game Design*. 2nd ed. Chichester: John Wiley & Sons.
+
+---
+
+## Entry 013 — Professional Pause System and Cinematic Game Over Screen
+
+**Date:** 25 March 2026
+
+**Feature summary:** Added a `'paused'` game state toggled by Esc or P, backed by a DOM glass-morph overlay with Resume and Exit to Menu buttons. Replaced the simple game over banner with a cinematic, progressively staged overlay: the world desaturates to greyscale over 2 seconds, then a serif epitaph fades in above a stats block and pulsing restart prompts. The M key on the game-over screen also returns to the main menu.
+
+**Files changed:** `game.js`, `style.css`, `refinements-changes.md`
+
+**Technical detail:**
+
+- **`GAMEOVER_FADE_FRAMES = 120`** — constant controlling the 2-second (120-frame) desaturation window.
+- **`gameOverTimer`** — integer added to `_initEntities()`, incremented each frame inside the new `'gameover'` branch of `update()`. Reset to `0` whenever `_initEntities()` is called (restart or exit to menu), ensuring no stale timer state persists between sessions.
+- **`_createPauseOverlay()`** — builds a `<div id="pause-overlay">` with two `<button class="pause-btn">` children, appends it to `document.body`, and wires click listeners to `_togglePause()` and `_exitToMenu()`. Using a real DOM element (rather than a canvas overlay) is the only way to access `backdrop-filter: blur(8px)`, which requires the GPU compositing layer. The same rationale was used for the Store overlay (Entry 005).
+- **`_togglePause()`** — switches `gameState` between `'playing'` and `'paused'` and shows/hides the overlay via `style.display`.
+- **`_exitToMenu()`** — calls `_initEntities()` (full reset including `gameOverTimer`), hides the store and pause overlays, and sets `gameState = 'menu'`. Reachable from both the pause overlay's 'Exit to Menu' button and the game-over screen's M key binding.
+- **`update()` paused bypass** — `this.time++` runs unconditionally (preserving sine-wave animations visible through the blur); all entity, spawning, and timer logic is skipped via an early `return` when `gameState === 'paused'`.
+- **`update()` gameover branch** — increments `gameOverTimer` and returns early, freezing the simulation while the cinematic sequence plays out.
+- **Grayscale desaturation** — in `draw()`, `ctx.filter = \`grayscale(N%)\`` is set *after* the initial `ctx.save()` call (which captures `filter: none` as the saved baseline), so `ctx.restore()` automatically reverts the filter before the HUD and overlay pass. This confines desaturation to the world layer (grid, entities, lighting) without requiring a second canvas.
+- **`drawGameOver()` — cinematic rewrite** — three-stage reveal driven by `gameOverTimer`: (1) dark veil reaches full opacity by frame 60; (2) content alpha fades in from frame 40–80 (`contentA`); (3) the pulsing `[R]` / `[M]` prompts animate on `this.time` so they breathe continuously once fully visible. The epitaph title uses `Georgia, "Times New Roman", serif` — a deliberate contrast to the HUD's `Courier New` monospace — to signal finality rather than mechanical readout.
+- **Draw-order change** — HUD, hero pointer, floating texts, and minimap are suppressed during `'gameover'` so the cinematic overlay has a clean surface. `drawGameOver()` is now called last, after `drawMinimap()`, so its full-screen dark veil correctly occludes all other elements.
+- **`mousemove` always active** — the `mousemove` listener added in the constructor is unconditional, so `this.mouseX` / `this.mouseY` remain current while paused. CSS `:hover` on `.pause-btn` elements therefore responds correctly with no additional canvas hit-testing required.
+- **keydown additions** — Esc and P call `_togglePause()` when `gameState` is `'playing'` or `'paused'`; M calls `_exitToMenu()` when `gameState` is `'gameover'`.
+
+**Logic Explanation:**
+
+- **State Persistence**: A well-designed state machine never leaks state between sessions. This implementation ensures that `_exitToMenu()` always calls `_initEntities()` before switching state, which resets every mutable game variable — wave counters, enemy arrays, flare timers, and crucially `gameOverTimer` — to their initial values. Isbister (2016:88) notes that a player's emotional recovery from a fail-state depends in part on the game "resetting the world cleanly"; a visible leftover artefact (e.g., a lingering desaturation on the menu screen) breaks immersion and signals to the player that their previous failure still persists. By tying `gameOverTimer = 0` to `_initEntities()` rather than to a separate reset path, the invariant is impossible to violate accidentally regardless of which code path triggers the menu return.
+
+- **Visual Hierarchy in UI Design**: Tufte (1990) and later Isbister (2016:ch.4) both argue that in moments of emotional weight — failure, victory, a major transition — the interface should reduce, not expand, its information density. The cinematic game-over screen strips the HUD entirely, suppresses the minimap, and uses a progressively revealed sequence (veil → title → stats → prompts) to pace the player's reading. The font switch from `Courier New` to `Georgia` reinforces this hierarchy: the epitaph "THE LIGHT HAS FADED" operates as a narrative statement (serif = literature, weight, closure) rather than a system readout (monospace = data, process, instrumentation). The two-line stat block beneath it then recontextualises the session as a record worth remembering, not just an error to dismiss, which Isbister (2016:91) identifies as a key factor in whether players attribute failure to skill deficit (and return) or to futility (and quit).
+
+- **Emotional impact of fail-states**: Isbister (2016:84–92) argues that the affective register of a fail-state — how the player *feels* about losing — is shaped as much by the presentation as by the mechanical challenge. A jarring, instantaneous game-over screen (the original single-frame red banner) signals punishment. A slow, elegiac desaturation followed by a grave serif epitaph signals *consequence*: the world did not arbitrarily end, the light genuinely faded. The 2-second greyscale transition is calibrated to fall within the "reflective pause" window Isbister describes: long enough for the emotional beat to register, short enough not to frustrate a player who wants to immediately retry. The [R] prompt appearing after the stats block (not before) ensures the player absorbs their score before they can dismiss it.
+
+**AI Collaboration Note:** AI (Cursor / Claude) recommended applying `ctx.filter` inside the existing `ctx.save()` block rather than before it, so `ctx.restore()` automatically reverts the filter — eliminating the need for an explicit `ctx.filter = 'none'` reset. AI also suggested the staggered reveal approach (veil → title → stats → prompts, each keyed to `gameOverTimer` thresholds) as a way to pace the emotional beat without a separate animation timeline. The decision to suppress the HUD during game over (rather than drawing the overlay on top of it) was flagged by AI as cleaner for the cinematic effect, since the dark veil would partially-but-not-fully obscure HUD elements, creating visual noise during a moment intended to feel resolved.
+
+---
+
+**References**
+
+Isbister, K. 2016. *How Games Move Us: Emotion by Design*. Cambridge, MA: MIT Press.
+
+Nystrom, R. 2014. *Game Programming Patterns*. [Online]. Available at: https://gameprogrammingpatterns.com [Accessed 25 March 2026].
+
+Rogers, S. 2014. *Level Up! The Guide to Great Video Game Design*. 2nd ed. Chichester: John Wiley & Sons.

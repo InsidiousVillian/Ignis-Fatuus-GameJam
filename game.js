@@ -58,6 +58,8 @@ const FLARE_SPAWN_FRAMES  = 2700;  // 45s at 60fps — periodic Ignis Flare spaw
 const FLARE_COMBO_TRIGGER = 5;     // combo count milestone that forces an early spawn
 const FLARE_DURATION      = 480;   // 8s active buff at 60fps
 
+const GAMEOVER_FADE_FRAMES = 120;  // 2s grayscale desaturation at 60fps
+
 const MINIMAP_RADIUS = 60;    // px — half-width of the circular minimap
 const MINIMAP_SCALE  = 0.10;  // world-to-minimap coordinate multiplier
 const MINIMAP_MARGIN = 20;    // px inset from canvas corner
@@ -1205,10 +1207,16 @@ class Game {
             if ((e.key === 'r' || e.key === 'R') && this.gameState === 'gameover') {
                 this.restart();
             }
+            if ((e.key === 'm' || e.key === 'M') && this.gameState === 'gameover') {
+                this._exitToMenu();
+            }
+            if ((e.key === 'Escape' || e.key === 'p' || e.key === 'P') &&
+                (this.gameState === 'playing' || this.gameState === 'paused')) {
+                this._togglePause();
+            }
             if (e.key === ' ') {
                 e.preventDefault();
                 if (this.gameState === 'menu') {
-                    // Space on menu: drop the barrier and begin Wave 1
                     this._startGame();
                 } else if (this.gameState === 'playing' && this.player.repelTimer >= REPEL_COOLDOWN) {
                     this.player.triggerRepel(this);
@@ -1227,6 +1235,7 @@ class Game {
         this._loadAssets();
         this._initEntities();
         this.store     = new Store(this);
+        this._createPauseOverlay();
         this.time      = 0;
         this.gameState = 'menu';    // Start on the main menu before Wave 1
 
@@ -1299,12 +1308,56 @@ class Game {
 
         this.ignisFlares     = [];       // active IgnisFlare pickups in the world
         this.flareSpawnTimer = 0;        // counts toward FLARE_SPAWN_FRAMES (45s interval)
+
+        this.gameOverTimer   = 0;        // frames elapsed in 'gameover' state (drives desaturation fade)
     }
 
     restart() {
         this._initEntities();
         this.store.hide();
         this.gameState = 'playing';
+    }
+
+    // Builds the DOM pause overlay with Resume and Exit to Menu buttons.
+    // backdrop-filter: blur(8px) requires a real composited DOM layer — same
+    // rationale as the Store overlay (see Entry 005).  mouseX/mouseY are always
+    // captured by the passive mousemove listener regardless of game state, so
+    // button hover is handled natively by CSS without any canvas hit-testing.
+    _createPauseOverlay() {
+        this.pauseOverlay = document.createElement('div');
+        this.pauseOverlay.id = 'pause-overlay';
+        this.pauseOverlay.innerHTML = `
+            <div class="pause-panel">
+                <h2 class="pause-header">PAUSED</h2>
+                <button class="pause-btn" id="btn-pause-resume">RESUME</button>
+                <button class="pause-btn" id="btn-pause-menu">EXIT TO MENU</button>
+            </div>
+        `;
+        document.body.appendChild(this.pauseOverlay);
+        document.getElementById('btn-pause-resume').addEventListener('click', () => this._togglePause());
+        document.getElementById('btn-pause-menu').addEventListener('click',  () => this._exitToMenu());
+    }
+
+    // Toggles between 'playing' and 'paused'.  The DOM overlay provides
+    // backdrop-filter blur; update() bypasses all game logic while paused.
+    _togglePause() {
+        if (this.gameState === 'playing') {
+            this.gameState = 'paused';
+            this.pauseOverlay.style.display = 'flex';
+        } else if (this.gameState === 'paused') {
+            this.gameState = 'playing';
+            this.pauseOverlay.style.display = 'none';
+        }
+    }
+
+    // Resets the simulation and returns to the main menu.
+    // Called from the Pause overlay's 'Exit to Menu' button and from the
+    // Game Over screen's M key binding.
+    _exitToMenu() {
+        this._initEntities();
+        this.store.hide();
+        this.pauseOverlay.style.display = 'none';
+        this.gameState = 'menu';
     }
 
     resize() {
@@ -1431,7 +1484,12 @@ class Game {
 
     update() {
         this.time++;
-        if (this.gameState === 'menu') { this._updateMenu(); return; }
+        if (this.gameState === 'menu')    { this._updateMenu(); return; }
+        if (this.gameState === 'paused')  { return; }          // world fully frozen
+        if (this.gameState === 'gameover') {
+            this.gameOverTimer++;                              // drives grayscale + overlay fade
+            return;
+        }
         if (this.gameState !== 'playing') return;
 
         this._tickWave();
@@ -1717,35 +1775,84 @@ class Game {
         ctx.restore();
     }
 
+    // ── Cinematic Game Over — Isbister (2016) on emotional weight of fail-states ─
+    // The overlay fades in progressively, using gameOverTimer so content is
+    // staggered: dark veil first, then epitaph, then stats, then prompts.
+    // A deliberate serif font ('Georgia') contrasts the HUD's Courier New — its
+    // elegance signals finality rather than technical readout (Visual Hierarchy
+    // principle: font choice communicates hierarchy and emotional register).
     drawGameOver() {
-        const ctx = this.ctx;
-        const cx  = this.canvas.width  / 2;
-        const cy  = this.canvas.height / 2;
+        const ctx  = this.ctx;
+        const cw   = this.canvas.width;
+        const ch   = this.canvas.height;
+        const cx   = cw / 2;
+        const cy   = ch / 2;
+        const t    = this.gameOverTimer;     // frames since gameover began
+        const font = '"Courier New", monospace';
 
         ctx.save();
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.72)';
-        ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-
         ctx.textAlign    = 'center';
         ctx.textBaseline = 'middle';
 
-        ctx.font        = 'bold 56px "Courier New", monospace';
-        ctx.fillStyle   = '#e74c3c';
-        ctx.shadowColor = '#e74c3c';
-        ctx.shadowBlur  = 28;
-        ctx.fillText('GAME OVER', cx, cy - 60);
+        // Progressive dark veil — reaches full opacity by frame 60 (1s)
+        const overlayA = Math.min(0.85, (t / 60) * 0.85);
+        ctx.fillStyle = `rgba(0, 0, 0, ${overlayA})`;
+        ctx.fillRect(0, 0, cw, ch);
+
+        // Stagger content: nothing visible until frame 40, then fade in over 40 frames
+        const contentA = Math.max(0, Math.min(1, (t - 40) / 40));
+        if (contentA <= 0) { ctx.restore(); return; }
+        ctx.globalAlpha = contentA;
+
+        // ── Epitaph title — elegant serif signals finality, not a techy readout ──
+        const titlePulse = 0.80 + 0.12 * Math.abs(Math.sin(this.time * 0.012));
+        ctx.font        = `bold 52px Georgia, "Times New Roman", serif`;
+        ctx.fillStyle   = `rgba(185, 55, 55, ${titlePulse})`;
+        ctx.shadowColor = 'rgba(155, 25, 25, 0.75)';
+        ctx.shadowBlur  = 30;
+        ctx.fillText('THE LIGHT HAS FADED', cx, cy - 110);
         ctx.shadowBlur  = 0;
 
-        ctx.font      = 'bold 20px "Courier New", monospace';
-        ctx.fillStyle = 'rgba(200, 220, 255, 0.9)';
-        ctx.fillText(`Wave Reached: ${this.wave}`, cx, cy);
-        ctx.fillText(`Final Score:  ${this.score}`, cx, cy + 34);
+        // Thin decorative rule beneath the title
+        const dW = 300;
+        ctx.strokeStyle = 'rgba(160, 55, 55, 0.35)';
+        ctx.lineWidth   = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(cx - dW / 2, cy - 70); ctx.lineTo(cx + dW / 2, cy - 70);
+        ctx.stroke();
 
-        const alpha = 0.5 + 0.5 * Math.abs(Math.sin(this.time * 0.04));
-        ctx.font      = '14px "Courier New", monospace';
-        ctx.fillStyle = `rgba(255, 247, 161, ${alpha})`;
-        ctx.fillText('PRESS  R  TO  RESTART', cx, cy + 90);
+        // ── Stats block ──────────────────────────────────────────────────────────
+        ctx.font = `13px ${font}`;
 
+        ctx.textAlign = 'right';
+        ctx.fillStyle = 'rgba(185, 200, 230, 0.65)';
+        ctx.fillText('Waves Survived', cx - 14, cy - 34);
+        ctx.fillText('Shadows Purged', cx - 14, cy - 8);
+
+        ctx.textAlign = 'left';
+        ctx.font      = `bold 13px ${font}`;
+        ctx.fillStyle = 'rgba(225, 235, 255, 0.92)';
+        ctx.fillText(`${this.wave}`,  cx + 22, cy - 34);
+        ctx.fillText(`${this.score}`, cx + 22, cy - 8);
+
+        // Second rule
+        ctx.strokeStyle = 'rgba(160, 55, 55, 0.35)';
+        ctx.lineWidth   = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(cx - dW / 2, cy + 18); ctx.lineTo(cx + dW / 2, cy + 18);
+        ctx.stroke();
+
+        // ── Prompts — pulsing so they draw the eye without overwhelming ───────────
+        const promptA = 0.48 + 0.52 * Math.abs(Math.sin(this.time * 0.04));
+        ctx.textAlign   = 'center';
+        ctx.font        = `12px ${font}`;
+        ctx.fillStyle   = `rgba(255, 247, 161, ${promptA})`;
+        ctx.shadowColor = '#ffe566';
+        ctx.shadowBlur  = promptA * 10;
+        ctx.fillText('[R]  Restart          [M]  Return to Menu', cx, cy + 58);
+        ctx.shadowBlur  = 0;
+
+        ctx.globalAlpha = 1;
         ctx.restore();
     }
 
@@ -2092,6 +2199,14 @@ class Game {
         ctx.save();
         ctx.translate(sx, sy);
 
+        // Gradual desaturation during game over (fades from colour to full grey over 2s).
+        // Applied after ctx.save() so ctx.restore() automatically reverts the filter;
+        // the HUD and cinematic overlay drawn after restore() remain in normal colour.
+        if (this.gameState === 'gameover' && this.gameOverTimer > 0) {
+            const grayFrac = Math.min(1, this.gameOverTimer / GAMEOVER_FADE_FRAMES);
+            ctx.filter = `grayscale(${Math.round(grayFrac * 100)}%)`;
+        }
+
         this.drawGrid();
 
         // Draw order: particles → ambient pulses → shockwaves → piles → flares → orbs → enemies → hero → trail → player → lighting
@@ -2127,16 +2242,17 @@ class Game {
             return;
         }
 
-        this.drawHUD();
-        this.drawHeroPointer();
+        // HUD, hero pointer and floating texts are suppressed during game over so
+        // the cinematic overlay has a clean canvas to fade into.
+        if (this.gameState !== 'gameover') {
+            this.drawHUD();
+            this.drawHeroPointer();
+            for (const ft of this.floatingTexts) ft.draw(ctx);
+            this.drawMinimap(ctx);
+        }
 
-        // Floating texts — drawn over HUD so they never disappear behind panels
-        for (const ft of this.floatingTexts) ft.draw(ctx);
-
+        // Cinematic game-over drawn last so its dark veil covers everything
         if (this.gameState === 'gameover') this.drawGameOver();
-
-        // Minimap drawn last so it sits above all other UI
-        this.drawMinimap(ctx);
     }
 
     loop() {
