@@ -62,6 +62,8 @@ const MINIMAP_RADIUS = 60;    // px — half-width of the circular minimap
 const MINIMAP_SCALE  = 0.10;  // world-to-minimap coordinate multiplier
 const MINIMAP_MARGIN = 20;    // px inset from canvas corner
 
+const MENU_CIRCLE_RADIUS = 220;  // px — safe-zone barrier ring radius in MENU state
+
 // ─── Upgrade Definitions ──────────────────────────────────────────────────────
 
 const UPGRADE_DEFS = [
@@ -1205,7 +1207,10 @@ class Game {
             }
             if (e.key === ' ') {
                 e.preventDefault();
-                if (this.gameState === 'playing' && this.player.repelTimer >= REPEL_COOLDOWN) {
+                if (this.gameState === 'menu') {
+                    // Space on menu: drop the barrier and begin Wave 1
+                    this._startGame();
+                } else if (this.gameState === 'playing' && this.player.repelTimer >= REPEL_COOLDOWN) {
                     this.player.triggerRepel(this);
                 }
             }
@@ -1223,7 +1228,7 @@ class Game {
         this._initEntities();
         this.store     = new Store(this);
         this.time      = 0;
-        this.gameState = 'playing';
+        this.gameState = 'menu';    // Start on the main menu before Wave 1
 
         this.loop();
     }
@@ -1365,8 +1370,68 @@ class Game {
         this.ignisFlares.push(new IgnisFlare(x, y));
     }
 
+    // ── Menu state update — minimal simulation for atmosphere ────────────────
+    // Advances the Player (cursor tracking + orbital angle) and the Hero (gentle
+    // wander) so the world looks alive behind the overlay.  Ambient sonar pulses
+    // are also ticked so the dark arena feels populated.
+    _updateMenu() {
+        const cx = this.canvas.width  / 2;
+        const cy = this.canvas.height / 2;
+
+        // Player: trail + cursor follow + orbit (no repel/nova/combo ticks)
+        this.player.trail.push({ x: this.player.x, y: this.player.y });
+        if (this.player.trail.length > TRAIL_LENGTH) this.player.trail.shift();
+        this.player.x = Math.max(this.player.radius, Math.min(this.canvas.width  - this.player.radius, this.mouseX));
+        this.player.y = Math.max(this.player.radius, Math.min(this.canvas.height - this.player.radius, this.mouseY));
+        this.player.orbitAngle += 0.035;
+        this.player.currentLightRadius =
+            this.player.lightRadius + Math.sin(this.time * PULSE_SPEED) * PULSE_AMPLITUDE;
+
+        // Hero: quiet wander within the centre zone
+        this.hero.state = 'wandering';
+        this.hero._wander(cx, cy);
+
+        // Ambient sonar pulses for atmosphere (no piles to ping)
+        this.scoutTimer++;
+        if (this.scoutTimer >= SCOUT_INTERVAL) {
+            this.scoutTimer = 0;
+            this.ambientPulses.push(new AmbientPulse(this.player.x, this.player.y));
+        }
+        for (let i = this.ambientPulses.length - 1; i >= 0; i--) {
+            this.ambientPulses[i].update([]);
+            if (this.ambientPulses[i].done) this.ambientPulses.splice(i, 1);
+        }
+    }
+
+    // ── Menu → Playing transition ─────────────────────────────────────────────
+    // Emits a "Deep Boom": heavy screen shake, full-screen flash, and a large
+    // cyan shockwave ring expanding from the screen centre — signalling the
+    // MenuCircle barrier dropping and Wave 1 beginning.
+    _startGame() {
+        const cx = this.canvas.width  / 2;
+        const cy = this.canvas.height / 2;
+
+        this.triggerShake(15, SHAKE_DURATION * 3);
+        this.flashFrames = NOVA_FLASH_FRAMES;
+
+        // Barrier-collapse shockwave — oversized to match the MenuCircle
+        this.shockWaves.push(new ShockWave(cx, cy, MENU_CIRCLE_RADIUS * 1.8, '#00ffff'));
+
+        // Radial burst of cyan particles
+        for (let i = 0; i < 48; i++) {
+            const angle = (i / 48) * Math.PI * 2;
+            const p = new Particle(cx, cy, '#00ffff');
+            p.vx = Math.cos(angle) * (4 + Math.random() * 4);
+            p.vy = Math.sin(angle) * (4 + Math.random() * 4);
+            this.particles.push(p);
+        }
+
+        this.gameState = 'playing';
+    }
+
     update() {
         this.time++;
+        if (this.gameState === 'menu') { this._updateMenu(); return; }
         if (this.gameState !== 'playing') return;
 
         this._tickWave();
@@ -1684,6 +1749,190 @@ class Game {
         ctx.restore();
     }
 
+    // ── Main menu overlay ─────────────────────────────────────────────────────
+    // Draws over the already-rendered world (grid + entities + lighting) to
+    // create a diegetic onboarding screen.  Three spatial layers:
+    //   1. World-space elements  — MenuCircle ring, entity labels
+    //   2. Screen-space title    — 'IGNIS FATUUS' + subtitle + SPACE prompt
+    //   3. Screen-space sidebar  — How to Play panel (right edge)
+    drawMenu() {
+        const ctx  = this.ctx;
+        const cw   = this.canvas.width;
+        const ch   = this.canvas.height;
+        const cx   = cw / 2;
+        const cy   = ch / 2;
+        const t    = this.time;
+        const font = '"Courier New", monospace';
+
+        ctx.save();
+
+        // Subtle dark veil — darkens the world just enough for text legibility
+        ctx.fillStyle = 'rgba(5, 5, 18, 0.50)';
+        ctx.fillRect(0, 0, cw, ch);
+
+        // ── MenuCircle — pulsing safe-zone barrier ring ───────────────────────
+        const pulse = Math.sin(t * 0.028);
+        const ringR = MENU_CIRCLE_RADIUS + pulse * 5;
+
+        // Soft radial fill — a faint inner glow just inside the ring
+        const ringGrad = ctx.createRadialGradient(cx, cy, ringR * 0.72, cx, cy, ringR * 1.14);
+        ringGrad.addColorStop(0,    'rgba(0, 255, 255, 0)');
+        ringGrad.addColorStop(0.72, 'rgba(0, 255, 255, 0)');
+        ringGrad.addColorStop(0.88, 'rgba(0, 255, 255, 0.045)');
+        ringGrad.addColorStop(1,    'rgba(0, 255, 255, 0)');
+        ctx.beginPath();
+        ctx.arc(cx, cy, ringR * 1.14, 0, Math.PI * 2);
+        ctx.fillStyle = ringGrad;
+        ctx.fill();
+
+        // Primary ring stroke
+        ctx.beginPath();
+        ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(0, 255, 255, ${0.22 + 0.08 * pulse})`;
+        ctx.lineWidth   = 1.5;
+        ctx.shadowColor = '#00ffff';
+        ctx.shadowBlur  = 18;
+        ctx.stroke();
+        ctx.shadowBlur  = 0;
+
+        // Inner echo ring
+        ctx.beginPath();
+        ctx.arc(cx, cy, ringR * 0.82, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(0, 190, 255, ${0.07 + 0.04 * Math.abs(pulse)})`;
+        ctx.lineWidth   = 0.8;
+        ctx.stroke();
+
+        // ── Diegetic labels — anchored to the live entity positions ──────────
+        // These float in world space, communicating intent without pausing the
+        // atmospheric animation (Rogers, 2014: diegetic UI principle).
+        ctx.textAlign    = 'center';
+        ctx.textBaseline = 'middle';
+        const dA = 0.55 + 0.45 * Math.abs(Math.sin(t * 0.04));
+
+        // "MOVE CURSOR" — below the Spark (Player)
+        ctx.globalAlpha = dA;
+        ctx.font        = `bold 11px ${font}`;
+        ctx.fillStyle   = '#00ffff';
+        ctx.shadowColor = '#00ffff';
+        ctx.shadowBlur  = 8;
+        ctx.fillText('MOVE  CURSOR', this.player.x, this.player.y + 30);
+        ctx.shadowBlur  = 0;
+
+        // "PROTECT THE HERO" — above the Hooded Shadow (Hero)
+        ctx.fillStyle   = 'rgba(200, 224, 255, 0.88)';
+        ctx.shadowColor = '#7ecfff';
+        ctx.shadowBlur  = 6;
+        ctx.fillText('PROTECT THE HERO', this.hero.x, this.hero.y - 38);
+        ctx.shadowBlur  = 0;
+        ctx.globalAlpha = 1;
+
+        // ── Title: IGNIS FATUUS ───────────────────────────────────────────────
+        const titleA = 0.88 + 0.12 * Math.abs(Math.sin(t * 0.018));
+        ctx.textAlign    = 'center';
+        ctx.textBaseline = 'middle';
+
+        // Double-render pass for stronger bloom without a second canvas
+        ctx.font      = `bold 58px ${font}`;
+        ctx.fillStyle = `rgba(0, 255, 255, ${titleA})`;
+        ctx.shadowColor = '#00ffff';
+        ctx.shadowBlur  = 42;
+        ctx.fillText('IGNIS FATUUS', cx, ch * 0.14);
+        ctx.shadowBlur  = 20;
+        ctx.fillText('IGNIS FATUUS', cx, ch * 0.14);
+        ctx.shadowBlur  = 0;
+
+        // Subtitle
+        ctx.font      = `11px ${font}`;
+        ctx.fillStyle = 'rgba(140, 175, 220, 0.52)';
+        ctx.fillText('— A GAME OF LIGHT AND SHADOW —', cx, ch * 0.14 + 46);
+
+        // ── PRESS SPACE TO START — pulsing ethereal prompt ────────────────────
+        const startA = 0.5 + 0.5 * Math.abs(Math.sin(t * 0.055));
+        ctx.font        = `bold 15px ${font}`;
+        ctx.fillStyle   = `rgba(255, 247, 161, ${startA})`;
+        ctx.shadowColor = '#ffe566';
+        ctx.shadowBlur  = startA * 16;
+        ctx.fillText('PRESS  SPACE  TO  START', cx, ch * 0.84);
+        ctx.shadowBlur  = 0;
+
+        ctx.restore();
+
+        // How to Play panel (own save/restore)
+        this._drawHowToPlay(ctx);
+    }
+
+    // ── 'How to Play' right-edge panel ────────────────────────────────────────
+    // A glass-style rounded panel listing the four core controls.
+    // Positioned at the vertical midpoint of the right edge so it doesn't
+    // compete with the title (top) or the start prompt (bottom).
+    _drawHowToPlay(ctx) {
+        const cw   = this.canvas.width;
+        const ch   = this.canvas.height;
+        const font = '"Courier New", monospace';
+        const panW = 256;
+        const panH = 160;
+        const panX = cw - 28 - panW;
+        const panY = ch / 2 - panH / 2;
+
+        ctx.save();
+
+        // Panel backdrop
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.60)';
+        ctx.beginPath();
+        ctx.roundRect(panX, panY, panW, panH, 8);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0, 255, 255, 0.14)';
+        ctx.lineWidth   = 1;
+        ctx.stroke();
+
+        // Header
+        ctx.textBaseline = 'middle';
+        ctx.textAlign    = 'left';
+        ctx.font         = `bold 11px ${font}`;
+        ctx.fillStyle    = 'rgba(0, 255, 255, 0.82)';
+        ctx.shadowColor  = '#00ffff';
+        ctx.shadowBlur   = 5;
+        ctx.fillText('HOW  TO  PLAY', panX + 18, panY + 20);
+        ctx.shadowBlur   = 0;
+
+        // Divider
+        ctx.strokeStyle = 'rgba(0, 255, 255, 0.12)';
+        ctx.lineWidth   = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(panX + 12, panY + 34);
+        ctx.lineTo(panX + panW - 12, panY + 34);
+        ctx.stroke();
+
+        const rows = [
+            { key: 'SPACE', desc: 'Kinetic Repel  —  Push',       color: '#00ffff' },
+            { key: 'F',     desc: 'Lumen Nova  —  Clear  (15s)',   color: '#ffffff' },
+            { key: 'HOVER', desc: 'Cleanse Shadow Piles',          color: '#b44fff' },
+            { key: 'COMBO', desc: '3+ Cleans  →  Light Boost',    color: '#4cff91' },
+        ];
+
+        ctx.font = `bold 10px ${font}`;
+        let ry = panY + 50;
+        for (const row of rows) {
+            // Key badge — dark pill behind the key label
+            ctx.fillStyle = 'rgba(12, 12, 32, 0.90)';
+            ctx.beginPath();
+            ctx.roundRect(panX + 14, ry - 8, 46, 16, 3);
+            ctx.fill();
+
+            ctx.textAlign = 'center';
+            ctx.fillStyle = row.color;
+            ctx.fillText(row.key, panX + 37, ry);
+
+            ctx.textAlign = 'left';
+            ctx.fillStyle = 'rgba(185, 208, 240, 0.72)';
+            ctx.fillText(row.desc, panX + 70, ry);
+
+            ry += 26;
+        }
+
+        ctx.restore();
+    }
+
     // Draws a small cyan arrow at the viewport edge pointing toward the Hero
     // when they wander beyond HERO_POINTER_DIST from the screen centre.
     // The clamping uses the viewport-rectangle projection (min-t method) so the
@@ -1870,6 +2119,12 @@ class Game {
             ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
             ctx.restore();
             this.flashFrames--;
+        }
+
+        // Menu overlay — world renders beneath it; early-return suppresses HUD/minimap
+        if (this.gameState === 'menu') {
+            this.drawMenu();
+            return;
         }
 
         this.drawHUD();

@@ -330,3 +330,39 @@ Ahearn, L. 2017. *3D Game Textures: Create Professional Game Art Using Photoshop
 Nystrom, R. 2014. *Game Programming Patterns*. [Online]. Available at: https://gameprogrammingpatterns.com [Accessed 25 March 2026].
 
 Schell, J. 2008. *The Art of Game Design: A Book of Lenses*. 1st ed. Burlington: Morgan Kaufmann.
+
+---
+
+## Entry 012 — Interactive Main Menu, Onboarding System & Safe-Zone MenuCircle
+**Date:** 2026-03-25 | **Milestone:** 6 — Player Onboarding & First Impression
+
+**Features Added:**
+- **`'menu'` game state** — added alongside existing `'playing'`, `'store'`, and `'gameover'` string-literal states. The game now launches into `'menu'` instead of `'playing'`, giving the player a structured entry point.
+- **`_updateMenu()`** — a dedicated partial-simulation tick that advances the Player (cursor tracking, trail, orbital angle), Hero (gentle wander), and ambient sonar pulses without running enemy spawning, wave timers, or ability logic. This keeps the world alive behind the overlay without the game being playable yet.
+- **`MenuCircle`** — a pulsing cyan ring of radius `MENU_CIRCLE_RADIUS = 220px` drawn at the screen centre. A slow sine oscillation (`sin(t × 0.028)`) modulates radius and stroke alpha, producing a "breathing" barrier effect. An inner radial gradient adds a faint glow fill. Because enemy spawning and wave logic are fully gated behind the `'playing'` state check in `update()`, the circle is diegetically accurate — enemies genuinely cannot enter during menu.
+- **Diegetic labels** — `MOVE CURSOR` and `PROTECT THE HERO` are drawn directly in world space, anchored to the live entity positions (`player.x/y`, `hero.x/y`). They pulse with `|sin(t × 0.04)|` and use `shadowBlur` for presence against the dark background. This is diegetic UI as defined by Rogers (2014:211): instructions embedded in the game world rather than delivered through a separate UI layer, preserving immersion.
+- **`IGNIS FATUUS` title** — drawn at `ch × 0.14` (14% from top) in bold 58px Courier New. A double-render pass (two consecutive `fillText` calls at decreasing `shadowBlur` values: 42 → 20) produces a multi-layer bloom without a second off-screen canvas.
+- **`PRESS SPACE TO START`** — pulsing with `|sin(t × 0.055)|` at bottom of screen (`ch × 0.84`), matching the Game Over restart prompt's visual rhythm.
+- **`_drawHowToPlay()` sidebar** — a glass-style rounded panel (256 × 160px) anchored to the right edge at vertical midpoint. Four rows: SPACE / Kinetic Repel, F / Lumen Nova, HOVER / Cleanse Piles, COMBO / Light Boost. Each row uses a dark pill badge behind the key label and a dimmed description colour, matching the HUD's typographic style.
+- **`_startGame()` transition** — pressing Space on the menu triggers the "Deep Boom": `triggerShake(15, SHAKE_DURATION × 3)`, `flashFrames = NOVA_FLASH_FRAMES`, a large cyan `ShockWave(cx, cy, MENU_CIRCLE_RADIUS × 1.8)`, and a 48-particle radial burst. Immediately sets `gameState = 'playing'` so all systems start on the same frame the effects play. No audio API call is made (not available in this environment), but the visual combination of flash + heavy shake + oversize shockwave ring constitutes the intended "Deep Boom" signal.
+- **`draw()` menu guard** — after the Nova flash block, a `gameState === 'menu'` check calls `drawMenu()` and returns early, suppressing the HUD, Hero pointer, floating texts, and minimap during the menu state. The world (grid, entities, lighting) renders fully beneath the overlay.
+
+**Logic Explanation:**
+
+- **Diegetic UI**: Rogers (2014:211) defines diegetic UI as interface elements that exist inside the game world rather than above it as a separate layer. The `MOVE CURSOR` and `PROTECT THE HERO` labels in this implementation are diegetic because they are drawn in world space and physically follow the entities they describe — if the Hero wanders left, the label moves with it. This is distinct from a static instructional overlay, which Rogers describes as "meta UI" (non-diegetic). The choice to use diegetic labels for onboarding reinforces the game's atmospheric visual identity: the world explains itself rather than pausing to deliver a tutorial card. The How to Play panel is intentionally semi-diegetic — it exists in screen space but uses the same `Courier New` monospaced typeface and dim colour palette as the in-world HUD, reducing the visual contrast between the overlay and the world beneath it.
+
+- **`_updateMenu()` — partial simulation**: The existing `update()` method gates all gameplay logic behind `if (this.gameState !== 'playing') return`. Rather than conditionally re-enabling individual systems inside that block, a dedicated `_updateMenu()` method is invoked as a clean parallel branch. This follows the State pattern (Nystrom, 2014:ch.7): each state owns its own update behaviour and cannot accidentally activate another state's systems. The method advances only the minimum set of systems required for the atmospheric presentation — Player trail and cursor follow, Hero wander, ambient sonar pulses — and skips everything else (repel timer, nova timer, combo logic, wave timer, enemy spawning). This is safer than a single `update()` with accumulated boolean guards, which would grow harder to audit as new states are added.
+
+- **Transition effect rationale**: The "Deep Boom" is deliberately maximal — the heaviest available screen shake, full Nova flash, an oversized shockwave (1.8× the barrier radius), and 48 burst particles. Schell (2008:289) argues that transitional moments in games benefit from disproportionate sensory response: the player has been holding the intent to play throughout the menu, so the reward for pressing Space should feel physically significant. Using existing systems (`triggerShake`, `flashFrames`, `ShockWave`, `Particle`) rather than a dedicated transition class keeps the implementation at zero code cost — the barrier-drop is fully expressed through the existing juice vocabulary.
+
+- **Note on "WASD to Move"**: The original specification requested "WASD to Move" as the player diegetic label. This game is mouse-controlled (the Player follows `mousemove` events); WASD keybindings are not implemented. The label was changed to "MOVE CURSOR" to accurately communicate the actual control scheme. Displaying incorrect instructions in an onboarding context undermines the core goal of diegetic UI — communicating intent truthfully within the game world (Rogers, 2014:211).
+
+**AI Collaboration Note:** AI (Cursor / Claude) recommended using a dedicated `_updateMenu()` method rather than conditionally enabling individual systems inside the existing `update()` early-return block, arguing that parallel update branches are easier to audit and extend than accumulated boolean guards. AI also suggested the double-render title bloom technique (two `fillText` calls at decreasing `shadowBlur` values) as a zero-cost alternative to an off-screen canvas pass. AI flagged the "WASD to Move" label as inaccurate for a mouse-controlled game and proposed substituting "MOVE CURSOR" with documentation of the rationale.
+
+---
+
+**References**
+
+Nystrom, R. 2014. *Game Programming Patterns*. [Online]. Available at: https://gameprogrammingpatterns.com [Accessed 25 March 2026].
+
+Rogers, S. 2014. *Level Up! The Guide to Great Video Game Design*. 2nd ed. Chichester: John Wiley & Sons.
