@@ -50,8 +50,13 @@ const COMBO_EXPIRE_FRAMES = 180;  // 3s window before combo resets
 const COMBO_STREAK_MIN    = 3;    // minimum cleans to trigger Lumen Streak
 const COMBO_STREAK_BONUS  = 0.5;  // fraction of lightRadius added during streak (+50%)
 
-const ENEMY_MAX_COUNT    = 15;    // maximum concurrent enemies on screen
-const FLOAT_LIFETIME     = 80;    // frames a FloatingText lives
+const ENEMY_MAX_COUNT       = 15;   // maximum concurrent enemies on screen
+const FLOAT_LIFETIME        = 80;   // frames a FloatingText lives
+const BURST_COOLDOWN_FRAMES = 180;  // 3s guard between double-spawn bursts
+
+const MINIMAP_RADIUS = 60;    // px — half-width of the circular minimap
+const MINIMAP_SCALE  = 0.10;  // world-to-minimap coordinate multiplier
+const MINIMAP_MARGIN = 20;    // px inset from canvas corner
 
 // ─── Upgrade Definitions ──────────────────────────────────────────────────────
 
@@ -257,6 +262,12 @@ class Player {
 
         this.x = mouseX;
         this.y = mouseY;
+
+        // Viewport clamp — player slides along the canvas boundary rather than
+        // disappearing off-screen; radius used as the soft wall thickness.
+        this.x = Math.max(this.radius, Math.min(game.canvas.width  - this.radius, this.x));
+        this.y = Math.max(this.radius, Math.min(game.canvas.height - this.radius, this.y));
+
         this.orbitAngle += 0.035;
 
         // Combo window countdown — resets count and streak when expired
@@ -1163,6 +1174,7 @@ class Game {
         this.shakeIntensity = 0;
         this.flashFrames    = 0;         // white flash counter for Nova
         this.damageShakeCooldown = 0;    // prevents per-frame spam when hero is swarmed
+        this.burstCooldown  = 0;         // 3s guard between double-spawn pulses
     }
 
     restart() {
@@ -1181,9 +1193,11 @@ class Game {
     spawnEnemy() {
         if (this.enemies.length >= ENEMY_MAX_COUNT) return;
 
-        // Pulse behaviour: when the field is sparse (< half cap), spawn 2 at once
-        // creating a wave-like surge that feels more intentional than a drip feed.
-        const count = this.enemies.length < Math.floor(ENEMY_MAX_COUNT / 2) ? 2 : 1;
+        // Burst pulse: spawn 2 when sparse, but guard with a 3s cooldown so a
+        // Nova clear doesn't immediately flood the screen with a double-surge.
+        const isSparse = this.enemies.length < Math.floor(ENEMY_MAX_COUNT / 2);
+        const count    = (isSparse && this.burstCooldown <= 0) ? 2 : 1;
+        if (count === 2) this.burstCooldown = BURST_COOLDOWN_FRAMES;
 
         for (let s = 0; s < count && this.enemies.length < ENEMY_MAX_COUNT; s++) {
             const w    = this.canvas.width;
@@ -1228,9 +1242,15 @@ class Game {
             this.spawnTimer = 0;
             this.spawnEnemy();
         }
+        if (this.burstCooldown > 0) this.burstCooldown--;
 
         this.player.update(this.mouseX, this.mouseY, this.shadowPiles, this);
         this.hero.update(this.enemies, this.canvas.width / 2, this.canvas.height / 2);
+
+        // Hero viewport clamp — slides along canvas edges rather than walking off
+        const hr = this.hero.radius;
+        this.hero.x = Math.max(hr, Math.min(this.canvas.width  - hr, this.hero.x));
+        this.hero.y = Math.max(hr, Math.min(this.canvas.height - hr, this.hero.y));
 
         // Track hero HP before enemy updates to detect damage events
         const hpBefore = this.hero.hp;
@@ -1558,6 +1578,83 @@ class Game {
         ctx.restore();
     }
 
+    // Tactical minimap — 120px circular overview in the bottom-right corner.
+    // Uses a world-to-minimap projection (MINIMAP_SCALE = 0.1) centred on the
+    // viewport midpoint. Dots: Hero = teal, Enemies = red, Piles = green,
+    // Player = warm yellow. Rendered with ctx.clip() so dots are masked to the circle.
+    drawMinimap(ctx) {
+        const R       = MINIMAP_RADIUS;
+        const S       = MINIMAP_SCALE;
+        const margin  = MINIMAP_MARGIN;
+        const mmCX    = this.canvas.width  - margin - R;
+        const mmCY    = this.canvas.height - margin - R;
+        const worldCX = this.canvas.width  / 2;
+        const worldCY = this.canvas.height / 2;
+
+        // Project world coordinates onto the minimap surface
+        const proj = (wx, wy) => ({
+            x: mmCX + (wx - worldCX) * S,
+            y: mmCY + (wy - worldCY) * S,
+        });
+
+        // ── Clipped interior (background + dots) ─────────────────────────────
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(mmCX, mmCY, R, 0, Math.PI * 2);
+        ctx.clip();
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.68)';
+        ctx.fillRect(mmCX - R, mmCY - R, R * 2, R * 2);
+
+        // Shadow Piles — teal-green dots
+        for (const pile of this.shadowPiles) {
+            const p = proj(pile.x, pile.y);
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+            ctx.fillStyle = '#00ff88';
+            ctx.fill();
+        }
+
+        // Enemies — red dots (skip dissolving)
+        for (const e of this.enemies) {
+            if (e.dying) continue;
+            const p = proj(e.x, e.y);
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+            ctx.fillStyle = '#ff3030';
+            ctx.fill();
+        }
+
+        // Hero — teal dot (larger, with glow)
+        const hp = proj(this.hero.x, this.hero.y);
+        ctx.beginPath();
+        ctx.arc(hp.x, hp.y, 3.5, 0, Math.PI * 2);
+        ctx.fillStyle   = '#00ffff';
+        ctx.shadowColor = '#00ffff';
+        ctx.shadowBlur  = 5;
+        ctx.fill();
+        ctx.shadowBlur  = 0;
+
+        // Player — warm yellow dot
+        const pp = proj(this.player.x, this.player.y);
+        ctx.beginPath();
+        ctx.arc(pp.x, pp.y, 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#fff7a1';
+        ctx.fill();
+
+        ctx.restore(); // end clip
+
+        // ── Cyan border ring — drawn after restore so it isn't clipped ───────
+        ctx.beginPath();
+        ctx.arc(mmCX, mmCY, R, 0, Math.PI * 2);
+        ctx.strokeStyle = '#00ffff';
+        ctx.lineWidth   = 1;
+        ctx.shadowColor = '#00ffff';
+        ctx.shadowBlur  = 6;
+        ctx.stroke();
+        ctx.shadowBlur  = 0;
+    }
+
     draw() {
         const ctx = this.ctx;
         ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -1615,6 +1712,9 @@ class Game {
         for (const ft of this.floatingTexts) ft.draw(ctx);
 
         if (this.gameState === 'gameover') this.drawGameOver();
+
+        // Minimap drawn last so it sits above all other UI
+        this.drawMinimap(ctx);
     }
 
     loop() {

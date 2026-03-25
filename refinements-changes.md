@@ -259,3 +259,35 @@ Swink, S. 2008. *Game Feel: A Game Designer's Guide to Virtual Sensation*. Burli
 Tulleken, H. 2015. *50 Tips for Better Game UI*. Gamasutra / Game Developer. Available at: https://www.gamedeveloper.com/design/50-tips-for-better-game-ui [Accessed 24 March 2026].
 
 Flanagan, D. 2020. *JavaScript: The Definitive Guide*. 7th ed. Sebastopol: O'Reilly Media.
+
+---
+
+## Entry 010 — Viewport Clamping, Tactical Minimap, Burst Spawn Fix
+**Date:** 2026-03-24 | **Milestone:** 4 — Spatial Clarity
+
+**Features Added:**
+- **Viewport Clamping**: `Player.update()` clamps `this.x/y` to `[radius, canvas.width/height − radius]` after applying mouse coordinates. Hero is clamped in `Game.update()` immediately after `hero.update()` returns, using `hero.radius` as the boundary margin. Both entities slide along canvas edges rather than stopping or clipping.
+- **Tactical Minimap**: `drawMinimap(ctx)` — 120px circular (`MINIMAP_RADIUS = 60`) overview drawn last in `draw()`, bottom-right corner, inset `MINIMAP_MARGIN = 20px`. `ctx.arc + ctx.clip()` masks all dot content to the circle. Coordinate projection: `mmX = mmCX + (worldX − canvasCX) × 0.10`. Dot key: Hero = teal 3.5px (glow), Enemies = red 2px, Shadow Piles = green 2px, Player = warm yellow 2.5px. Cyan 1px border drawn after `ctx.restore()` so the stroke is unclipped and fully visible.
+- **Burst Spawn Cooldown**: `BURST_COOLDOWN_FRAMES = 180` (3s). `spawnEnemy()` only triggers the double-spawn when `this.burstCooldown <= 0`; after a burst fires, `burstCooldown` is set to 180 and decremented each `update()` tick — prevents a Nova clear from immediately re-flooding the field.
+
+**Logic Explanation:**
+
+- **Viewport clamping — 'coherent physical space'**: `Math.max(r, Math.min(W − r, v))` is the canonical single-expression clamp. Using `this.radius` as the margin means the *visual* boundary of the entity coincides with the canvas edge — the sprite never renders half off-screen, preserving the perceptual "box" of the play space. According to Isbister (2016:44), players build and rely on mental models of game space; entities clipping out of frame disrupt this model and increase cognitive load. The hero clamp is placed in `Game.update()` rather than `Hero.update()` to keep the `Hero` class independent of canvas dimensions — `Game` owns the canvas and is the correct architectural layer for world-boundary enforcement.
+
+- **Spatial UI — Tactical Minimap**: At the zoom level needed to see characters clearly, threats across the screen are invisible until they enter the camera frustum. The minimap provides constant low-cost spatial awareness without requiring the player to pan or zoom (Isbister, 2016:61). Using `ctx.clip()` guarantees dots outside the map circle are fully masked — without it, dots near the edge produce visual noise that makes the boundary ambiguous. Drawing the cyan border *after* `ctx.restore()` (which pops the clip path) is critical: a stroked path inside a clip region is half-masked, rendering as a hairline rather than the intended 1px border. The warm-yellow Player dot distinguishes the "camera position" (the player is stationary, the world is fixed) from the teal Hero, who is the moving NPC the player is tracking.
+
+- **Burst cooldown rationale**: Without the guard, a Nova clear that drops `enemies.length` to 0 would trigger a double-spawn on the very next `spawnTimer` tick, producing a surge immediately after the player's most powerful ability — negating the "breathing room" the Nova is designed to create. The 3s cooldown matches the expected reorientation time after a Nova and the time needed for the first new enemies to close in from the screen edge.
+
+**AI Collaboration Note:** AI (Cursor / Claude) flagged the border clipping issue (stroke drawn inside clip is half-masked) and recommended the post-restore draw order. AI also suggested placing the hero clamp in `Game.update()` rather than modifying `Hero.update()`'s parameter signature, noting it keeps the Hero class testable and decoupled from the canvas layer.
+
+---
+
+**References**
+
+Isbister, K. 2016. *How Games Move Us: Emotion by Design*. Cambridge: MIT Press.
+
+Swink, S. 2008. *Game Feel: A Game Designer's Guide to Virtual Sensation*. Burlington: Morgan Kaufmann.
+
+Tulleken, H. 2015. *50 Tips for Better Game UI*. Gamasutra / Game Developer. Available at: https://www.gamedeveloper.com/design/50-tips-for-better-game-ui [Accessed 24 March 2026].
+
+Flanagan, D. 2020. *JavaScript: The Definitive Guide*. 7th ed. Sebastopol: O'Reilly Media.
