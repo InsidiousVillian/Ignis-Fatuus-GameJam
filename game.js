@@ -352,6 +352,12 @@ class Player {
                         game._spawnFlare();
                         game.flareSpawnTimer = 0;
                     }
+
+                    // ── Procedural audio feedback ─────────────────────────────
+                    game.audio.playSoundEffect('corpse_collect');
+                    if (this.comboCount >= COMBO_STREAK_MIN) {
+                        game.audio.playSoundEffect('combo_ping', { combo: this.comboCount });
+                    }
                 }
             } else {
                 pile.hoverFrames = 0;
@@ -411,6 +417,7 @@ class Player {
         if (this.novaTimer < NOVA_COOLDOWN) return;
         this.novaTimer = 0;
 
+        game.audio.playSoundEffect('nova_blast');
         game.triggerShake(NOVA_SHAKE_INT, SHAKE_DURATION * 2);
         game.flashFrames = NOVA_FLASH_FRAMES;
 
@@ -1059,6 +1066,7 @@ class IgnisFlare {
             game.floatingTexts.push(new FloatingText(
                 player.x, player.y - 58, 'IGNIS FLARE!', '#ffcc00', 18
             ));
+            game.audio.playSoundEffect('flare_pickup');
         }
     }
 
@@ -1115,6 +1123,257 @@ class IgnisFlare {
             ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
         }
         ctx.closePath();
+    }
+}
+
+// ─── AudioManager ─────────────────────────────────────────────────────────────
+// Wraps HTMLAudioElement for looping background music with volume control,
+// mute toggle, and smooth fade transitions driven by setInterval.
+//
+// play() is intentionally separated from construction: browsers enforce the
+// Web Audio Autoplay Policy (Chrome 66+, Firefox 66+) which blocks audio.play()
+// unless triggered inside a direct user-gesture handler.  Initialising the
+// Audio object in the constructor is safe; calling play() only from _startGame()
+// (which runs inside a 'keydown' handler) guarantees the gesture requirement is
+// satisfied (Collins, 2008:189; MDN Web Docs, 2024).
+
+class AudioManager {
+    constructor(src) {
+        this.audio         = new Audio(src);
+        this.audio.loop    = true;
+        this.muted         = false;
+        this._targetVol    = 0.5;
+        this._fadeInterval = null;
+        this._ctx          = null;   // AudioContext created lazily on first gesture
+    }
+
+    // Start playback.  Must be called from within a user-gesture handler.
+    // Also ensures the AudioContext is created here (gesture scope), satisfying
+    // Safari's strict policy that ctx.resume() must happen in a synchronous handler.
+    play() {
+        this._getCtx();
+        this.audio.play().catch(() => {});
+    }
+
+    // Instantly set volume and cancel any running fade.
+    setVolume(v) {
+        this._clearFade();
+        this._targetVol = v;
+        if (!this.muted) this.audio.volume = v;
+    }
+
+    // Smoothly ramp volume from the current level to targetVol over durationMs.
+    // Uses setInterval (independent of RAF) so the fade continues even when the
+    // game loop pauses or slows.  Previous fades are cancelled before starting.
+    fadeTo(targetVol, durationMs) {
+        this._clearFade();
+        const steps    = 60;
+        const stepMs   = Math.max(16, durationMs / steps);
+        const startVol = this.audio.volume;
+        const delta    = (targetVol - startVol) / steps;
+        let   step     = 0;
+        this._fadeInterval = setInterval(() => {
+            step++;
+            const v = Math.max(0, Math.min(1, startVol + delta * step));
+            this._targetVol = v;
+            if (!this.muted) this.audio.volume = v;
+            if (step >= steps) this._clearFade();
+        }, stepMs);
+    }
+
+    // Toggle mute.  _targetVol is preserved so unmuting restores the correct level
+    // even mid-fade (e.g. unpausing after a duck, or un-muting during a game-over
+    // fade — the fade interval continues updating _targetVol silently).
+    toggleMute() {
+        this.muted        = !this.muted;
+        this.audio.volume = this.muted ? 0 : this._targetVol;
+        return this.muted;
+    }
+
+    // Pause and reset the track (used when returning to the main menu so the
+    // next play() always starts from the beginning at full volume).
+    stop() {
+        this._clearFade();
+        this.audio.pause();
+        this.audio.currentTime = 0;
+        this._targetVol        = 0.5;
+        if (!this.muted) this.audio.volume = 0.5;
+    }
+
+    _clearFade() {
+        if (this._fadeInterval) {
+            clearInterval(this._fadeInterval);
+            this._fadeInterval = null;
+        }
+    }
+
+    // ── Procedural Sound Effects (Web Audio API) ────────────────────────────
+    // AudioContext is created lazily but always first touched inside play(),
+    // which runs in a 'keydown' gesture handler — satisfying autoplay policy.
+    // All SFX are mute-aware: playSoundEffect() returns immediately if muted.
+
+    _getCtx() {
+        if (!this._ctx) {
+            this._ctx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (this._ctx.state === 'suspended') this._ctx.resume();
+        return this._ctx;
+    }
+
+    // Dispatch to the appropriate sound profile.
+    // data = { combo: Number } used by 'combo_ping' to scale pitch.
+    playSoundEffect(type, data = {}) {
+        if (this.muted) return;
+        const ctx = this._getCtx();
+        switch (type) {
+            case 'flare_pickup':   this._sfxFlare(ctx);                      break;
+            case 'corpse_collect': this._sfxCorpse(ctx);                     break;
+            case 'nova_blast':     this._sfxNova(ctx);                       break;
+            case 'combo_ping':     this._sfxComboPing(ctx, data.combo ?? 1); break;
+        }
+    }
+
+    // High-pitched rising sine shimmer (0.2s) with a feedback delay for
+    // a short reverb tail — signals a rare, luminous pickup event.
+    // Signal chain: osc → env → lpf → output
+    //                                 ↳ delay ↔ feedback gain (converging loop)
+    _sfxFlare(ctx) {
+        const now = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const env = ctx.createGain();
+        const lpf = ctx.createBiquadFilter();
+        const dly = ctx.createDelay(0.5);
+        const fb  = ctx.createGain();
+        const out = ctx.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, now);
+        osc.frequency.exponentialRampToValueAtTime(1760, now + 0.2);
+
+        env.gain.setValueAtTime(0.4, now);
+        env.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+
+        lpf.type            = 'lowpass';
+        lpf.frequency.value = 4000;
+        lpf.Q.value         = 1.5;
+
+        dly.delayTime.value = 0.08;
+        fb.gain.value       = 0.38;   // < 1 so each echo is 38% of previous — converges
+
+        out.gain.value = 0.42;
+
+        osc.connect(env);
+        env.connect(lpf);
+        lpf.connect(out);
+        lpf.connect(dly);             // feed pre-fader signal into delay for natural tail
+        dly.connect(fb);
+        fb.connect(dly);              // feedback loop
+        dly.connect(out);
+        out.connect(ctx.destination);
+
+        osc.start(now);
+        osc.stop(now + 0.35);         // slightly longer than envelope to let delay ring out
+    }
+
+    // Low-frequency triangle thump with rapid frequency drop — evokes the muffled
+    // implosion of a shadow dissolving into the ground (Farnell, 2010:240).
+    _sfxCorpse(ctx) {
+        const now = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const env = ctx.createGain();
+        const lpf = ctx.createBiquadFilter();
+        const out = ctx.createGain();
+
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(120, now);
+        osc.frequency.exponentialRampToValueAtTime(40, now + 0.1);
+
+        env.gain.setValueAtTime(0.7, now);
+        env.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+
+        lpf.type            = 'lowpass';
+        lpf.frequency.value = 500;    // very dark — almost felt rather than heard
+        lpf.Q.value         = 0.8;
+
+        out.gain.value = 0.42;
+
+        osc.connect(env);
+        env.connect(lpf);
+        lpf.connect(out);
+        out.connect(ctx.destination);
+
+        osc.start(now);
+        osc.stop(now + 0.15);
+    }
+
+    // White-noise burst with rapidly sweeping low-pass filter — simulates an
+    // explosion that cuts to vacuum silence as the blast front passes.
+    // Farnell (2010:318) describes this filter-sweep technique as the perceptual
+    // basis for all procedural explosion sounds.
+    _sfxNova(ctx) {
+        const now    = ctx.currentTime;
+        const dur    = 0.8;
+        const bufLen = Math.ceil(ctx.sampleRate * dur);
+        const buf    = ctx.createBuffer(1, bufLen, ctx.sampleRate);
+        const pcm    = buf.getChannelData(0);
+        for (let i = 0; i < bufLen; i++) pcm[i] = Math.random() * 2 - 1;
+
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+
+        const env = ctx.createGain();
+        const lpf = ctx.createBiquadFilter();
+        const out = ctx.createGain();
+
+        env.gain.setValueAtTime(0.9, now);
+        env.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+        lpf.type = 'lowpass';
+        lpf.frequency.setValueAtTime(8000, now);
+        lpf.frequency.exponentialRampToValueAtTime(200, now + dur);
+
+        out.gain.value = 0.42;
+
+        src.connect(env);
+        env.connect(lpf);
+        lpf.connect(out);
+        out.connect(ctx.destination);
+
+        src.start(now);
+        // BufferSource auto-stops when the buffer runs out
+    }
+
+    // Glassy square-wave ping whose pitch rises with each combo hit —
+    // gives immediate audio feedback that the combo counter is escalating.
+    // High resonance (Q=3) on the low-pass creates the 'glass strike' timbre.
+    _sfxComboPing(ctx, combo) {
+        const now  = ctx.currentTime;
+        const freq = Math.min(2200, 880 + (combo - 1) * 110);
+
+        const osc = ctx.createOscillator();
+        const env = ctx.createGain();
+        const lpf = ctx.createBiquadFilter();
+        const out = ctx.createGain();
+
+        osc.type            = 'square';
+        osc.frequency.value = freq;
+
+        env.gain.setValueAtTime(0.28, now);
+        env.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+
+        lpf.type            = 'lowpass';
+        lpf.frequency.value = 3000;
+        lpf.Q.value         = 3.0;   // resonance peak gives the 'glassy' ring quality
+
+        out.gain.value = 0.42;
+
+        osc.connect(env);
+        env.connect(lpf);
+        lpf.connect(out);
+        out.connect(ctx.destination);
+
+        osc.start(now);
+        osc.stop(now + 0.2);
     }
 }
 
@@ -1207,8 +1466,12 @@ class Game {
             if ((e.key === 'r' || e.key === 'R') && this.gameState === 'gameover') {
                 this.restart();
             }
-            if ((e.key === 'm' || e.key === 'M') && this.gameState === 'gameover') {
-                this._exitToMenu();
+            if (e.key === 'm' || e.key === 'M') {
+                if (this.gameState === 'gameover') {
+                    this._exitToMenu();
+                } else {
+                    this._toggleMute();
+                }
             }
             if ((e.key === 'Escape' || e.key === 'p' || e.key === 'P') &&
                 (this.gameState === 'playing' || this.gameState === 'paused')) {
@@ -1236,6 +1499,7 @@ class Game {
         this._initEntities();
         this.store     = new Store(this);
         this._createPauseOverlay();
+        this.audio     = new AudioManager('./assets/audio/bg_music.mp3');
         this.time      = 0;
         this.gameState = 'menu';    // Start on the main menu before Wave 1
 
@@ -1315,6 +1579,10 @@ class Game {
     restart() {
         this._initEntities();
         this.store.hide();
+        // Audio may be at volume 0 after the gameover fade — re-start playback
+        // and fade back up so the restart feels energetic, not silent.
+        this.audio.play();
+        this.audio.fadeTo(0.5, 800);
         this.gameState = 'playing';
     }
 
@@ -1344,9 +1612,12 @@ class Game {
         if (this.gameState === 'playing') {
             this.gameState = 'paused';
             this.pauseOverlay.style.display = 'flex';
+            // Duck to 0.15 — low presence signals background state (Collins, 2008)
+            this.audio.fadeTo(0.15, 500);
         } else if (this.gameState === 'paused') {
             this.gameState = 'playing';
             this.pauseOverlay.style.display = 'none';
+            this.audio.fadeTo(0.5, 500);
         }
     }
 
@@ -1357,7 +1628,13 @@ class Game {
         this._initEntities();
         this.store.hide();
         this.pauseOverlay.style.display = 'none';
+        this.audio.stop();
         this.gameState = 'menu';
+    }
+
+    // Delegates to AudioManager; the HUD icon re-reads audio.muted each frame.
+    _toggleMute() {
+        this.audio.toggleMute();
     }
 
     resize() {
@@ -1479,6 +1756,12 @@ class Game {
             this.particles.push(p);
         }
 
+        // Satisfy the browser's autoplay policy: play() must be called inside a
+        // user-gesture handler.  The 'keydown SPACE' event that reaches _startGame()
+        // qualifies, so this is the correct and only place to begin playback.
+        this.audio.play();
+        this.audio.setVolume(0.5);
+
         this.gameState = 'playing';
     }
 
@@ -1487,6 +1770,9 @@ class Game {
         if (this.gameState === 'menu')    { this._updateMenu(); return; }
         if (this.gameState === 'paused')  { return; }          // world fully frozen
         if (this.gameState === 'gameover') {
+            // Kick off the cinematic volume fade on the very first gameover frame,
+            // timed to match the 2s grayscale desaturation (GAMEOVER_FADE_FRAMES).
+            if (this.gameOverTimer === 0) this.audio.fadeTo(0, 3000);
             this.gameOverTimer++;                              // drives grayscale + overlay fade
             return;
         }
@@ -1770,6 +2056,23 @@ class Game {
 
             bx += BADGE_W + BADGE_GAP;
         }
+
+        // ── Mute toggle icon — small speaker glyph below the upgrade badge panel ──
+        // Centred over the badge panel so it reads as part of the same cluster.
+        // Re-reads audio.muted each frame; no separate dirty flag needed.
+        const muteX = rPanelX + totalW / 2;
+        const muteY = rPanelY + BADGE_H + 20;
+
+        ctx.textAlign    = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font         = '15px sans-serif';
+        ctx.globalAlpha  = this.audio.muted ? 0.45 : 0.72;
+        ctx.fillText(this.audio.muted ? '🔇' : '🔊', muteX, muteY);
+
+        ctx.font         = `9px ${font}`;
+        ctx.fillStyle    = 'rgba(140, 160, 190, 0.38)';
+        ctx.globalAlpha  = 1;
+        ctx.fillText('[M]', muteX, muteY + 13);
 
         ctx.textAlign = 'left';
         ctx.restore();

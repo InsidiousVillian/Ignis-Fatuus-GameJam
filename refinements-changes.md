@@ -411,3 +411,89 @@ Isbister, K. 2016. *How Games Move Us: Emotion by Design*. Cambridge, MA: MIT Pr
 Nystrom, R. 2014. *Game Programming Patterns*. [Online]. Available at: https://gameprogrammingpatterns.com [Accessed 25 March 2026].
 
 Rogers, S. 2014. *Level Up! The Guide to Great Video Game Design*. 2nd ed. Chichester: John Wiley & Sons.
+
+---
+
+## Entry 014 — Professional Audio System
+
+**Date:** 25 March 2026
+
+**Feature summary:** Created a standalone `AudioManager` class that wraps `HTMLAudioElement` with volume control, smooth `setInterval`-driven fade transitions, and a persistent mute toggle. Integrated it into the `Game` class state machine: music begins on the SPACE key press that launches Wave 1, ducks to 0.15 while paused, fades to 0 over 3 seconds on game over (matched to the grayscale desaturation), and stops completely on return to menu. A `🔊` / `🔇` icon below the upgrade badge panel in the HUD provides visible mute feedback; M toggles mute during all states except game over (where M is already bound to 'Return to Menu').
+
+**Files changed:** `game.js`, `refinements-changes.md`
+
+**Technical detail:**
+
+- **`AudioManager` class** — placed before `Store` and `Game`. Exposes: `play()`, `setVolume(v)`, `fadeTo(targetVol, durationMs)`, `toggleMute()`, `stop()`, and the private `_clearFade()`. The `_fadeInterval` handle is stored on the instance so every new `fadeTo()` call cancels any running fade before starting a new one — preventing volume drift from overlapping intervals.
+- **Autoplay bypass** — `new Audio(src)` is safe to call in the constructor; the browser only blocks `.play()`, not construction. The `play()` method is called exclusively inside `_startGame()`, which is triggered by the 'keydown' SPACE handler — a qualifying user-gesture event under Chrome 66+ and Firefox 66+ autoplay policy. The `.catch(() => {})` swallows any residual `NotAllowedError` gracefully (MDN Web Docs, 2024).
+- **`fadeTo(targetVol, durationMs)`** — 60-step `setInterval` running at `max(16, durationMs/60)` ms per tick. Starting volume is read from `this.audio.volume` (the *actual* current level, not `_targetVol`) so back-to-back fades chain correctly without a jump. `_targetVol` is updated each tick so the mute toggle always knows the "intended" level.
+- **Audio ducking on pause** — `_togglePause()` calls `this.audio.fadeTo(0.15, 500)` when entering 'paused' and `fadeTo(0.5, 500)` when resuming. Collins (2008:201) describes audio ducking as a technique that "communicates foreground/background state change without visual cues" — the listener registers the shift in attention even before reading the visual overlay.
+- **Cinematic gameover fade** — in `update()`, the first gameover frame (`gameOverTimer === 0`) triggers `this.audio.fadeTo(0, 3000)`. The 3-second duration intentionally exceeds `GAMEOVER_FADE_FRAMES` (2s) so silence is reached slightly *after* the greyscale completes, producing a brief moment of visual stasis before audio silence — a deliberate pacing choice to let the visual epitaph breathe before the world goes fully quiet.
+- **`restart()` re-entry** — calls `this.audio.play()` (no-op if not paused) then `fadeTo(0.5, 800)` to ramp the volume back up from 0 over 0.8 seconds, giving the restart a sense of energy returning to the world.
+- **`_exitToMenu()` stop** — calls `this.audio.stop()`, which cancels any running fade, pauses the track, resets `currentTime = 0`, and restores `_targetVol = 0.5`. This ensures the next `play()` call (in `_startGame()`) always starts the track from the beginning at full volume.
+- **Mute toggle** — `toggleMute()` sets `audio.volume` to 0 or `_targetVol` without touching any running fade. This means a gameover fade that is in progress will continue updating `_targetVol` silently while muted; unmuting mid-fade snaps volume to the current `_targetVol` (wherever the fade reached), which is the most predictable behaviour.
+- **M key routing** — in the keydown handler, M is checked in a single branch: if `gameState === 'gameover'`, it calls `_exitToMenu()`; otherwise it calls `_toggleMute()`. The two uses are in mutually exclusive states so there is no binding conflict.
+- **HUD mute icon** — drawn in `drawHUD()` after the upgrade badges loop, centred over the badge panel. Uses Unicode emoji `🔊` / `🔇` rendered via `ctx.font = '15px sans-serif'`; a small `[M]` hint label below communicates the key binding. `globalAlpha` is 0.45 when muted (dimmed to signal off-state) and 0.72 when active. The icon re-reads `this.audio.muted` every frame — no separate dirty flag or DOM element needed.
+
+**Logic Explanation:**
+
+- **Web Audio Autoplay Policies**: Modern browsers (Chrome 66+, Firefox 66+, Safari 11+) enforce an autoplay policy that silently rejects `HTMLMediaElement.play()` unless the page has been interacted with. Collins (2008:189) notes that "the relationship between sound and player interaction is foundational to immersive game audio" — a game that opens with immediate background music without any player action violates both the browser policy and the design principle that audio should respond to agency. Initialising the `Audio` object in the constructor (safe) but deferring `play()` to the SPACE keydown handler (user gesture) satisfies the policy and, as a side effect, aligns the music's start with the player's deliberate decision to begin the game, reinforcing the sense that the world activates in response to their action.
+
+- **Audio Ducking for UI Focus**: Collins (2008:201–205) describes audio ducking as a mixing technique borrowed from broadcast production, where a primary signal is automatically attenuated when a secondary signal requires attention. In this implementation, ducking to 0.15 while paused performs two functions simultaneously: it reduces the music from a foreground presence to a barely-perceptible ambient reminder that the game is suspended (not over), and it creates a clear contrast between 'playing' (0.5, present) and 'paused' (0.15, receded) that players can feel without reading. The 500ms fade prevents a jarring cut; the gradual ramp reinforces that the transition is intentional rather than a glitch. This is distinct from the game-over fade to 0, which is a narrative gesture (the light — and the music — has faded) rather than a functional UI signal.
+
+**AI Collaboration Note:** AI (Cursor / Claude) recommended using `setInterval` rather than the game loop's `requestAnimationFrame` for the fade, arguing that interval-based fades continue running even when the browser throttles the RAF (e.g. on hidden tabs or slow devices). AI also suggested reading `this.audio.volume` as the fade start point (rather than `_targetVol`) so that back-to-back `fadeTo()` calls chain smoothly from the actual current volume. The 3-second gameover fade duration (exceeding the 2s grayscale) was proposed by AI to create a brief post-visual silence beat.
+
+---
+
+**References**
+
+Collins, K. 2008. *Game Sound: An Introduction to the History, Theory, and Practice of Video Game Music and Sound Design*. Cambridge, MA: MIT Press.
+
+Isbister, K. 2016. *How Games Move Us: Emotion by Design*. Cambridge, MA: MIT Press.
+
+Nystrom, R. 2014. *Game Programming Patterns*. [Online]. Available at: https://gameprogrammingpatterns.com [Accessed 25 March 2026].
+
+Rogers, S. 2014. *Level Up! The Guide to Great Video Game Design*. 2nd ed. Chichester: John Wiley & Sons.
+
+---
+
+## Entry 015 — Procedural Sound Effect System
+
+**Date:** 25 March 2026
+
+**Feature summary:** Extended the `AudioManager` class with a Web Audio API (`AudioContext`) procedural sound engine. Added four sound profiles — `flare_pickup`, `corpse_collect`, `nova_blast`, `combo_ping` — synthesised entirely at runtime with no external audio files. All profiles pass through a low-pass filter to maintain the dark atmospheric register of the background drone. Integrated calls at each corresponding game event. The `AudioContext` is created lazily but guaranteed to first be constructed inside the `play()` gesture handler, satisfying all major browser autoplay policies.
+
+**Files changed:** `game.js`, `refinements-changes.md`
+
+**Technical detail:**
+
+- **`_getCtx()`** — lazy `AudioContext` factory. Returns `this._ctx` if already created; otherwise constructs `new (window.AudioContext || window.webkitAudioContext)()` and calls `resume()` if suspended. The first call always happens inside `play()` (a gesture handler), ensuring Safari's strict policy is met on all subsequent calls.
+- **`playSoundEffect(type, data = {})`** — public dispatcher. Returns immediately if `this.muted` is true (zero CPU cost when muted). `data.combo` carries the current combo count for `combo_ping`.
+- **`_sfxFlare(ctx)` — 'flare_pickup'**: Sine oscillator, 880 Hz → 1760 Hz frequency ramp over 0.2s, exponential gain decay to near-zero. A feedback delay loop (`delayTime=0.08s`, `feedback gain=0.38`) provides a short reverb shimmer tail; the feedback gain below 1.0 guarantees the loop converges (each echo is 38% of the previous). Low-pass cutoff: 4000 Hz, Q=1.5. Oscillator scheduled to stop at `now+0.35s` to allow the delay tail to ring out naturally.
+- **`_sfxCorpse(ctx)` — 'corpse_collect'**: Triangle oscillator, 120 Hz → 40 Hz over 0.1s, gain decay to near-zero. Low-pass cutoff: 500 Hz, Q=0.8 — so dark it is felt more than heard, consistent with the visual weight of a shadow dissolving. Farnell (2010:240) describes this frequency drop pattern as the perceptual basis for 'thud/impact' synthesis.
+- **`_sfxNova(ctx)` — 'nova_blast'**: White noise generated by filling a mono `AudioBuffer` with `Math.random() * 2 - 1` at `ctx.sampleRate`. Gain envelopes from 0.9 → 0 over 0.8s. The low-pass filter frequency sweeps from 8000 Hz → 200 Hz over the same 0.8s using `exponentialRampToValueAtTime` — simulating the perceptual effect of an explosion that cuts to vacuum silence as the blast pressure wave passes (Farnell, 2010:318). The `BufferSource` auto-stops when the buffer finishes, leaving no dangling nodes.
+- **`_sfxComboPing(ctx, combo)` — 'combo_ping'**: Square oscillator at `min(2200, 880 + (combo-1) × 110)` Hz — each successive pile clean raises the pitch by a minor-third interval (110 Hz = one tone), creating a rising staircase that aurally communicates escalating combo tension. Low-pass Q=3.0 introduces resonance at the cutoff frequency, producing the characteristic 'glassy' ring associated with struck crystal (Farnell, 2010:145). Only fires when `comboCount >= COMBO_STREAK_MIN` (3), reserving the sound as a reward for streak maintenance.
+- **Master gain = 0.42** on all SFX: keeps effects below unity to prevent clipping against the `HTMLAudioElement` background track. Since the two audio systems (Web Audio API and `HTMLAudioElement`) share the same device output, gain staging between them must be managed manually (there is no shared AudioContext mixer).
+- **Integration points**: `corpse_collect` on every shadow-pile clean; `combo_ping` (with `{ combo: this.comboCount }`) only when streak-active; `flare_pickup` on `IgnisFlare` collection; `nova_blast` at the start of `triggerNova()` (before shake/flash) so the audio onset coincides with the visual flash frame.
+
+**Logic Explanation:**
+
+- **Procedural vs. Sampled Audio in web games**: Sampled audio (`.mp3`, `.ogg` files) requires network requests, decoding time, and heap memory proportional to sample length and quality. Farnell (2010:8) defines procedural audio as "the real-time algorithmic generation of sound from a compact set of parameters", arguing that it is fundamentally more scalable for interactive contexts because the 'asset' is a description, not a recording. In a browser game specifically, four procedural sound profiles add zero bytes to the network payload, have zero decode latency (synthesis begins at `ctx.currentTime`, the most precise timestamp in the Web Audio API), and produce audio that responds dynamically to game state (e.g., `combo_ping` pitch scaling with `comboCount`). A sampled equivalent would require four separate `.ogg` files (typically 20–80 KB each), HTTP round trips, and static pitches — losing the escalating-tension feedback that the `combo_ping` provides. The trade-off is that procedural synthesis requires explicit perceptual modelling (Farnell, 2010:ch.4), whereas sampling captures inherent acoustic complexity for free; for simple game feedback events, procedural synthesis is the superior choice.
+
+- **Low-pass filtering for atmospheric consistency**: All four SFX profiles route through a low-pass filter before reaching the output. This is a deliberate mixing decision: the background drone is spectrally dark (attenuated high frequencies), and introducing bright, unfiltered SFX would create a perceptual layer mismatch — the effects would feel 'pasted on' rather than belonging to the same acoustic world. By cutting each SFX above its profile-specific frequency ceiling (500 Hz for `corpse_collect`, 3000 Hz for `combo_ping`, 4000 Hz for `flare_pickup`, 8000→200 Hz sweep for `nova_blast`), all effects sit within the same dark frequency register as the background, producing a unified sonic environment (Collins, 2008:42).
+
+**AI Collaboration Note:** AI (Cursor / Claude) proposed the `_getCtx()` lazy-factory pattern with the AudioContext first-touch guaranteed inside `play()`, explaining that triggering `AudioContext` construction from `play()` (a direct gesture handler) rather than from game-loop events (which are asynchronous from the gesture) satisfies both Chrome's and Safari's resumption requirements. AI also recommended using `Math.random() * 2 - 1` PCM buffer fill rather than a `ScriptProcessorNode` for white noise generation, noting that a pre-filled `AudioBuffer` is scheduled deterministically at `ctx.currentTime` with zero per-sample JavaScript overhead, whereas `ScriptProcessorNode` introduces callback scheduling jitter.
+
+---
+
+**References**
+
+Collins, K. 2008. *Game Sound: An Introduction to the History, Theory, and Practice of Video Game Music and Sound Design*. Cambridge, MA: MIT Press.
+
+Farnell, A. 2010. *Designing Sound*. Cambridge, MA: MIT Press.
+
+Isbister, K. 2016. *How Games Move Us: Emotion by Design*. Cambridge, MA: MIT Press.
+
+Nystrom, R. 2014. *Game Programming Patterns*. [Online]. Available at: https://gameprogrammingpatterns.com [Accessed 25 March 2026].
+
+Rogers, S. 2014. *Level Up! The Guide to Great Video Game Design*. 2nd ed. Chichester: John Wiley & Sons.
