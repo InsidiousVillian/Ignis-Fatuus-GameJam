@@ -54,6 +54,10 @@ const ENEMY_MAX_COUNT       = 15;   // maximum concurrent enemies on screen
 const FLOAT_LIFETIME        = 80;   // frames a FloatingText lives
 const BURST_COOLDOWN_FRAMES = 180;  // 3s guard between double-spawn bursts
 
+const FLARE_SPAWN_FRAMES  = 2700;  // 45s at 60fps — periodic Ignis Flare spawn interval
+const FLARE_COMBO_TRIGGER = 5;     // combo count milestone that forces an early spawn
+const FLARE_DURATION      = 480;   // 8s active buff at 60fps
+
 const MINIMAP_RADIUS = 60;    // px — half-width of the circular minimap
 const MINIMAP_SCALE  = 0.10;  // world-to-minimap coordinate multiplier
 const MINIMAP_MARGIN = 20;    // px inset from canvas corner
@@ -252,6 +256,8 @@ class Player {
         this.comboTimer   = 0;
         this.streakActive = false;
         this.streakBonus  = 0;             // computed each frame from streak state
+        this.flareActive  = false;         // true while Ignis Flare buff is running
+        this.flareTimer   = 0;             // counts down from FLARE_DURATION to 0
         // this.img is intentionally absent — resolved via Player.prototype.img after asset load
     }
 
@@ -279,10 +285,18 @@ class Player {
             }
         }
 
+        // Ignis Flare buff countdown
+        if (this.flareTimer > 0) {
+            this.flareTimer--;
+            if (this.flareTimer === 0) this.flareActive = false;
+        }
+
         // Streak bonus: +50% light radius when combo streak is active
+        // Flare bonus: Luminous Overload — doubles effective light radius
         this.streakBonus = this.streakActive ? this.lightRadius * COMBO_STREAK_BONUS : 0;
+        const flareBonus = this.flareActive   ? this.lightRadius                      : 0;
         this.currentLightRadius =
-            this.lightRadius + this.streakBonus + Math.sin(game.time * PULSE_SPEED) * PULSE_AMPLITUDE;
+            this.lightRadius + this.streakBonus + flareBonus + Math.sin(game.time * PULSE_SPEED) * PULSE_AMPLITUDE;
 
         // Repel charge & auto-fire
         if (this.repelTimer < REPEL_COOLDOWN) this.repelTimer++;
@@ -328,6 +342,12 @@ class Player {
                             pile.x, pile.y - 42, `×${this.comboCount} COMBO`, '#00ffff', 12
                         ));
                     }
+
+                    // Combo milestone: spawn Ignis Flare at count 5 if none is present
+                    if (this.comboCount === FLARE_COMBO_TRIGGER && game.ignisFlares.length === 0) {
+                        game._spawnFlare();
+                        game.flareSpawnTimer = 0;
+                    }
                 }
             } else {
                 pile.hoverFrames = 0;
@@ -338,16 +358,20 @@ class Player {
     // Emit shockwave, knock back + stun all enemies within REPEL_RADIUS.
     // Initial knockback velocity of 15px/frame with 0.85 friction gives ~100px
     // total displacement over the stun window (geometric series: 15/(1-0.85) = 100).
+    // Emit shockwave, knock back + stun all enemies within REPEL_RADIUS.
+    // When Ignis Flare is active ('Holy Repel' mode), the shockwave turns gold
+    // and any enemy within range is instantly vaporised instead of stunned.
     triggerRepel(game) {
         this.repelTimer = 0;
         game.triggerShake(REPEL_SHAKE_INT, SHAKE_DURATION);
 
-        game.shockWaves.push(new ShockWave(this.x, this.y));
+        const repelColor = this.flareActive ? '#ffcc00' : '#00ffff';
+        game.shockWaves.push(new ShockWave(this.x, this.y, REPEL_RADIUS, repelColor));
 
-        // Radial particle burst
+        // Radial particle burst — gold during Flare
         for (let i = 0; i < 28; i++) {
             const angle = (i / 28) * Math.PI * 2;
-            const p = new Particle(this.x, this.y, '#00ffff');
+            const p = new Particle(this.x, this.y, repelColor);
             p.vx = Math.cos(angle) * (3 + Math.random() * 2.5);
             p.vy = Math.sin(angle) * (3 + Math.random() * 2.5);
             game.particles.push(p);
@@ -357,11 +381,22 @@ class Player {
             if (enemy.dying) continue;
             const dist = Math.hypot(this.x - enemy.x, this.y - enemy.y);
             if (dist < REPEL_RADIUS && dist > 0) {
-                const angle  = Math.atan2(enemy.y - this.y, enemy.x - this.x);
-                const factor = 1 - dist / REPEL_RADIUS;   // stronger when closer
-                enemy.knockbackVx = Math.cos(angle) * 15 * factor;
-                enemy.knockbackVy = Math.sin(angle) * 15 * factor;
-                enemy.stunFrames  = REPEL_STUN_FRAMES;
+                if (this.flareActive) {
+                    // Holy Repel — Vaporize: instant destroy with gold burst
+                    for (let j = 0; j < 8; j++) {
+                        const p = new Particle(enemy.x, enemy.y, '#ffcc00');
+                        p.vx = (Math.random() - 0.5) * 5;
+                        p.vy = (Math.random() - 0.5) * 5;
+                        game.particles.push(p);
+                    }
+                    enemy.dying = true;
+                } else {
+                    const angle  = Math.atan2(enemy.y - this.y, enemy.x - this.x);
+                    const factor = 1 - dist / REPEL_RADIUS;   // stronger when closer
+                    enemy.knockbackVx = Math.cos(angle) * 15 * factor;
+                    enemy.knockbackVy = Math.sin(angle) * 15 * factor;
+                    enemy.stunFrames  = REPEL_STUN_FRAMES;
+                }
             }
         }
     }
@@ -426,9 +461,8 @@ class Player {
     // Opacity and radius both scale linearly with recency so the oldest dot is
     // almost invisible and the newest blends seamlessly into the core.
     drawTrail(ctx) {
-        // Trail colour shifts to white during Lumen Streak — visual cue that
-        // the player is in a boosted state.
-        const col = this.streakActive ? '#ffffff' : '#00ffff';
+        // Trail colour priority: Flare (gold) > Streak (white) > default (cyan).
+        const col = this.flareActive ? '#ffcc00' : this.streakActive ? '#ffffff' : '#00ffff';
         const len = this.trail.length;
         for (let i = 0; i < len; i++) {
             const t     = (i + 1) / len;          // 0→1: oldest→newest
@@ -998,6 +1032,88 @@ class HealOrb {
     }
 }
 
+// ─── IgnisFlare ───────────────────────────────────────────────────────────────
+// World-space pickup that grants the Ignis Flare buff for FLARE_DURATION frames.
+// Visual: a slowly rotating 5-point white-gold star with flickering alpha and a
+// shadowBlur of 20px, matching the "burning light" theme of the power-up.
+
+class IgnisFlare {
+    constructor(x, y) {
+        this.x         = x;
+        this.y         = y;
+        this.radius    = 12;
+        this.age       = 0;
+        this.collected = false;
+    }
+
+    update(player, game) {
+        this.age++;
+        if (Math.hypot(this.x - player.x, this.y - player.y) < this.radius + player.radius + 6) {
+            player.flareActive = true;
+            player.flareTimer  = FLARE_DURATION;
+            this.collected     = true;
+            game.floatingTexts.push(new FloatingText(
+                player.x, player.y - 58, 'IGNIS FLARE!', '#ffcc00', 18
+            ));
+        }
+    }
+
+    draw(ctx) {
+        const flicker = Math.sin(this.age * 0.22);               // −1 → 1 flicker wave
+        const r       = this.radius * (0.88 + Math.abs(flicker) * 0.22);
+        const alpha   = 0.78 + Math.abs(flicker) * 0.22;
+        const rot     = this.age * 0.022;                         // slow rotation
+
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(rot);
+
+        // Outer soft halo — screen-blend warm glow
+        ctx.globalCompositeOperation = 'screen';
+        const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 2.8);
+        halo.addColorStop(0,   'rgba(255, 220, 60, 0.45)');
+        halo.addColorStop(0.5, 'rgba(255, 160, 20, 0.12)');
+        halo.addColorStop(1,   'rgba(0,   0,   0,  0)');
+        ctx.fillStyle = halo;
+        ctx.beginPath();
+        ctx.arc(0, 0, r * 2.8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalCompositeOperation = 'source-over';
+
+        // 5-point star body
+        ctx.shadowColor = '#fff8a0';
+        ctx.shadowBlur  = 20;
+        ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        this._starPath(ctx, 5, r, r * 0.42);
+        ctx.fillStyle = '#ffe566';
+        ctx.fill();
+
+        // White-hot inner core
+        ctx.shadowBlur = 14;
+        ctx.beginPath();
+        ctx.arc(0, 0, r * 0.32, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 255, 230, 0.95)';
+        ctx.fill();
+
+        ctx.shadowBlur  = 0;
+        ctx.globalAlpha = 1;
+        ctx.restore();
+    }
+
+    // Builds a star path centred at (0, 0) with alternating outer / inner radii.
+    _starPath(ctx, points, outerR, innerR) {
+        const step = Math.PI / points;
+        ctx.moveTo(0, -outerR);
+        for (let i = 1; i < points * 2; i++) {
+            const r     = i % 2 === 0 ? outerR : innerR;
+            const angle = i * step - Math.PI / 2;
+            ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
+        }
+        ctx.closePath();
+    }
+}
+
 // ─── Store ────────────────────────────────────────────────────────────────────
 
 class Store {
@@ -1175,6 +1291,9 @@ class Game {
         this.flashFrames    = 0;         // white flash counter for Nova
         this.damageShakeCooldown = 0;    // prevents per-frame spam when hero is swarmed
         this.burstCooldown  = 0;         // 3s guard between double-spawn pulses
+
+        this.ignisFlares     = [];       // active IgnisFlare pickups in the world
+        this.flareSpawnTimer = 0;        // counts toward FLARE_SPAWN_FRAMES (45s interval)
     }
 
     restart() {
@@ -1229,6 +1348,21 @@ class Game {
         this.wave++;
         this.spawnTimer = 0;
         this.gameState  = 'playing';
+    }
+
+    // Spawns an IgnisFlare pickup at a random ShadowPile position.
+    // Falls back to a random central-area position if no piles exist.
+    _spawnFlare() {
+        let x, y;
+        if (this.shadowPiles.length > 0) {
+            const pile = this.shadowPiles[Math.floor(Math.random() * this.shadowPiles.length)];
+            x = pile.x;
+            y = pile.y;
+        } else {
+            x = this.canvas.width  * (0.2 + Math.random() * 0.6);
+            y = this.canvas.height * (0.2 + Math.random() * 0.6);
+        }
+        this.ignisFlares.push(new IgnisFlare(x, y));
     }
 
     update() {
@@ -1295,6 +1429,19 @@ class Game {
         for (let i = this.ambientPulses.length - 1; i >= 0; i--) {
             this.ambientPulses[i].update(this.shadowPiles);
             if (this.ambientPulses[i].done) this.ambientPulses.splice(i, 1);
+        }
+
+        // Ignis Flare — periodic spawn (45s) and update / collection check
+        if (this.ignisFlares.length === 0) {
+            this.flareSpawnTimer++;
+            if (this.flareSpawnTimer >= FLARE_SPAWN_FRAMES) {
+                this.flareSpawnTimer = 0;
+                this._spawnFlare();
+            }
+        }
+        for (let i = this.ignisFlares.length - 1; i >= 0; i--) {
+            this.ignisFlares[i].update(this.player, this);
+            if (this.ignisFlares[i].collected) this.ignisFlares.splice(i, 1);
         }
 
         for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
@@ -1370,9 +1517,10 @@ class Game {
         const novaFrac   = Math.min(1, this.player.novaTimer  / NOVA_COOLDOWN);
         const novaReady  = novaFrac >= 1;
         const streak     = this.player.streakActive;
+        const flareOn    = this.player.flareActive;
 
-        // Panel height grows if streak is active (extra combo row)
-        const panelH = streak ? 122 : 102;
+        // Panel grows by 20px per active optional row (Flare bar + Streak row)
+        const panelH = 102 + (flareOn ? 20 : 0) + (streak ? 20 : 0);
         ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
         ctx.beginPath();
         ctx.roundRect(pad - 8, pad - 14, 148, panelH, 6);
@@ -1430,15 +1578,33 @@ class Game {
         ctx.fillRect(pad + 50, pad + 64, 70 * novaFrac, 3);
         ctx.shadowBlur = 0;
 
-        // Streak indicator row (only when active)
+        // Flare active bar — displayed directly below Nova when buff is running
+        if (flareOn) {
+            const flareFrac = this.player.flareTimer / FLARE_DURATION;
+            ctx.font      = `bold 11px ${font}`;
+            ctx.fillStyle = '#ffcc00';
+            ctx.fillText('FLARE', pad, pad + 92);
+
+            ctx.fillStyle = 'rgba(60, 60, 80, 0.5)';
+            ctx.fillRect(pad + 50, pad + 84, 70, 3);
+
+            ctx.fillStyle   = '#ffcc00';
+            ctx.shadowColor = '#ffcc00';
+            ctx.shadowBlur  = 8;
+            ctx.fillRect(pad + 50, pad + 84, 70 * flareFrac, 3);
+            ctx.shadowBlur  = 0;
+        }
+
+        // Streak indicator row — shifts down 20px when Flare bar is also visible
         if (streak) {
-            const blinkA = 0.7 + 0.3 * Math.abs(Math.sin(this.time * 0.12));
+            const streakY = pad + 92 + (flareOn ? 20 : 0);
+            const blinkA  = 0.7 + 0.3 * Math.abs(Math.sin(this.time * 0.12));
             ctx.font         = `bold 11px ${font}`;
             ctx.globalAlpha  = blinkA;
             ctx.fillStyle    = '#ffffff';
             ctx.shadowColor  = '#ffffff';
             ctx.shadowBlur   = 8;
-            ctx.fillText(`STREAK  ×${this.player.comboCount}`, pad, pad + 92);
+            ctx.fillText(`STREAK  ×${this.player.comboCount}`, pad, streakY);
             ctx.shadowBlur   = 0;
             ctx.globalAlpha  = 1;
         }
@@ -1679,11 +1845,12 @@ class Game {
 
         this.drawGrid();
 
-        // Draw order: particles → ambient pulses → shockwaves → piles → orbs → enemies → hero → trail → player → lighting
+        // Draw order: particles → ambient pulses → shockwaves → piles → flares → orbs → enemies → hero → trail → player → lighting
         for (const p     of this.particles)     p.draw(ctx);
         for (const ap    of this.ambientPulses) ap.draw(ctx);
         for (const sw    of this.shockWaves)    sw.draw(ctx);
         for (const pile  of this.shadowPiles)   pile.draw(ctx, this.cleanFrames, this.time);
+        for (const flare of this.ignisFlares)   flare.draw(ctx);
         for (const orb   of this.healOrbs)      orb.draw(ctx);
         for (const e     of this.enemies)       e.draw(ctx);
         this.hero.draw(ctx);

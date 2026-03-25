@@ -291,3 +291,42 @@ Swink, S. 2008. *Game Feel: A Game Designer's Guide to Virtual Sensation*. Burli
 Tulleken, H. 2015. *50 Tips for Better Game UI*. Gamasutra / Game Developer. Available at: https://www.gamedeveloper.com/design/50-tips-for-better-game-ui [Accessed 24 March 2026].
 
 Flanagan, D. 2020. *JavaScript: The Definitive Guide*. 7th ed. Sebastopol: O'Reilly Media.
+
+---
+
+## Entry 011 — Ignis Flare Power-Up, Holy Repel, FLARE HUD Bar & Structural Polish
+**Date:** 2026-03-25 | **Milestone:** 5 — Power-Up System & Structural Completion
+
+**Features Added:**
+- **`IgnisFlare` class** — world-space pickup: a slowly rotating 5-point white-gold star with flickering alpha and a fixed `shadowBlur` of 20px. Spawned at a random `ShadowPile` position (falls back to a random central area if no piles exist).
+- **Dual spawn triggers**: periodic 45-second timer (`FLARE_SPAWN_FRAMES = 2700`) and combo milestone (`FLARE_COMBO_TRIGGER = 5`) — only one flare may exist in the world at a time.
+- **Luminous Overload**: while the 8-second buff (`FLARE_DURATION = 480`) is active, `Player.currentLightRadius` is effectively doubled by adding `this.lightRadius` as a `flareBonus` alongside the existing streak bonus and sine pulse.
+- **Gold Trail**: `Player.drawTrail()` colour priority chain updated to `flareActive ? '#ffcc00' : streakActive ? '#ffffff' : '#00ffff'`.
+- **Holy Repel**: `Player.triggerRepel()` detects `this.flareActive` and switches from knockback/stun to instant vaporise — any enemy within `REPEL_RADIUS` is set to `dying = true` with a gold particle micro-burst. The `ShockWave` and radial burst particles also turn `#ffcc00` during flare mode.
+- **FLARE HUD bar**: a gold `fillRect` progress bar labelled `FLARE` appears below the NOVA row in the left panel. Panel height grows by 20px per active optional row (`102 + (flareOn ? 20 : 0) + (streak ? 20 : 0)`). The STREAK row shifts down an additional 20px when both are visible.
+- **`IGNIS FLARE!` FloatingText** (gold, 18px) spawned at pickup.
+- **Viewport Clamping & Minimap** confirmed structurally intact from Entry 010 — no regressions introduced.
+
+**Logic Explanation:**
+
+- **Power-Up Balancing**: Schell (2008:180) describes balancing as the process of adjusting game elements so that no single strategy dominates and every choice remains meaningful. The Ignis Flare is intentionally time-limited (8 seconds) and single-instance (one pickup at a time) to prevent compounding with Nova for a zero-risk loop. The two spawn triggers — periodic timer and combo milestone — create a risk/reward asymmetry: an aggressive player who chains five cleans quickly is rewarded earlier, but also draws more enemies, increasing the danger of the flare period. This mirrors the "dynamic difficulty adjustment" principle discussed by Schell (2008:182): the player's own skill level influences when the power-up arrives, without the game explicitly tracking difficulty.
+
+- **Temporary State Variables**: The buff is managed entirely through two instance variables on `Player`: `flareActive` (boolean gate) and `flareTimer` (integer countdown). This is the "Temporary State" pattern for timed buffs described implicitly in Schell (2008:196) and elaborated by Nystrom (2014:ch.6): a boolean flag activates the modified code paths (trail colour, repel behaviour, lightRadius calculation), while a decrementing counter provides the duration contract. When `flareTimer` reaches zero, `flareActive` is set to `false` in the same frame, restoring all systems to their default state in a single frame. Crucially, no other class needs to know about the flare state — `Player.triggerRepel()` reads `this.flareActive` internally, and `drawHUD()` reads it via `this.player.flareActive`. This keeps the buff fully self-contained within the entity that owns the state, consistent with the single-source-of-truth architecture established in Entry 002.
+
+- **`IgnisFlare` visual design**: The star shape uses a `_starPath()` helper that generates a closed polygon path by alternating between `outerR` and `innerR` at each of the `points × 2` vertices. A slow per-frame rotation (`age × 0.022` radians, ≈ 1.3°/frame, full rotation every ~280 frames) and a `Math.sin(age × 0.22)` flicker wave modulating both radius and alpha create the "burning" appearance without any sprite asset. The screen-blend warm halo behind the star ensures the pickup is legible against the dark background (Ahearn, 2017:212), while `shadowBlur = 20` on the star body provides the specified glow intensity.
+
+- **Spawn location logic**: Attaching the spawn to an existing `ShadowPile` position is a deliberate design choice — it creates a "hot spot" in the player's natural path of movement (toward piles) rather than spawning at an arbitrary screen location. This reduces the risk of the pickup appearing in an unreachable position during a dense-enemy phase. The fallback to a random central-area position (20%–80% of canvas dimensions) ensures the game never fails to materialise the flare even when the field is clear.
+
+- **HUD layout — dynamic row stacking**: Rather than hardcoding separate panel height values for every combination of active rows, the panel height formula `102 + (flareOn ? 20 : 0) + (streak ? 20 : 0)` computes the correct height additively. The STREAK row Y-coordinate uses `pad + 92 + (flareOn ? 20 : 0)` to shift it below the Flare bar when both are simultaneously visible. This approach scales to any future optional row additions without requiring a full layout refactor — each new conditional row contributes a fixed `+ 20` increment and a corresponding Y offset in downstream rows.
+
+**AI Collaboration Note:** AI (Cursor / Claude) recommended the additive panel-height formula over a conditional ladder of hardcoded heights, noting it scales to future optional rows without layout rewrites. AI also suggested spawning the flare at an existing pile's position rather than a random screen position, arguing it creates natural player pathing incentives and avoids out-of-reach spawns during low-pile phases. AI proposed the dual-channel flare state (`flareActive` + `flareTimer`) over a single countdown variable, as the boolean gate allows instant zero-cost reads in all draw paths without a `> 0` comparison.
+
+---
+
+**References**
+
+Ahearn, L. 2017. *3D Game Textures: Create Professional Game Art Using Photoshop*. 4th ed. Boca Raton: CRC Press.
+
+Nystrom, R. 2014. *Game Programming Patterns*. [Online]. Available at: https://gameprogrammingpatterns.com [Accessed 25 March 2026].
+
+Schell, J. 2008. *The Art of Game Design: A Book of Lenses*. 1st ed. Burlington: Morgan Kaufmann.
