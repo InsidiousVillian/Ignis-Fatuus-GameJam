@@ -225,3 +225,37 @@ Flanagan, D. 2020. *JavaScript: The Definitive Guide*. 7th ed. Sebastopol: O'Rei
 Tulleken, H. 2015. *50 Tips for Better Game UI*. Gamasutra / Game Developer. Available at: https://www.gamedeveloper.com/design/50-tips-for-better-game-ui [Accessed 24 March 2026].
 
 Flanagan, D. 2020. *JavaScript: The Definitive Guide*. 7th ed. Sebastopol: O'Reilly Media.
+
+---
+
+## Entry 009 — Lumen Nova, Screen Shake, Combo System, Enemy Scaling Fix
+**Date:** 2026-03-24 | **Milestone:** 4 — Juice & Game Feel
+
+**Features Added:**
+- **Lumen Nova (Panic Button)**: `Player.triggerNova(game)` — 15s gated ability (F key or left-click). Instantly sets all enemies within 400px to `dying`, clears all Shadow Piles within radius (spawning orbs + score), emits a white `ShockWave` at `NOVA_RADIUS`, 48-particle radial burst, heavy screen shake (`intensity=10, duration=28f`), and a white flash that fades over 30 frames (~0.5s). `novaTimer` starts at `NOVA_COOLDOWN` so the ability is immediately available on game start.
+- **Screen Shake System**: `Game.triggerShake(intensity, duration)` clamps to the strongest pending shake so simultaneous events don't cancel each other. Each frame in `draw()`, a linearly decaying random translate (`intensity × decay × random[-1,1]`) is applied inside a `ctx.save/restore` block. HUD, flash overlay, and floating texts are drawn after `ctx.restore()` — only world geometry judders. Three trigger sites: Nova (`intensity=10`), Repel (`intensity=4`), and hero-damage (`intensity=3`, 60-frame spam guard).
+- **Combo System & Floating Text**: `FloatingText` class — drifts up at 1.4px/frame decelerating at `vy *= 0.96`, fades over `FLOAT_LIFETIME=80` frames. Cleaning a pile: increments `comboCount`, resets `comboTimer` to 180 frames. On expiry: count resets and `streakActive = false`. Spawns `+100` (purple) and `×N COMBO` (cyan) texts. At `comboCount >= 3`: activates **Lumen Streak** — trail turns white, light radius gains +50% via `streakBonus`. NOVA cleans also contribute to the combo. HUD left panel gains a blinking `STREAK ×N` row when active.
+- **Enemy Cap + Pulse Spawning**: `ENEMY_MAX_COUNT = 15` hard caps concurrent enemies. `spawnEnemy()` now spawns 2 at once when `enemies.length < 7` (below half-cap), creating natural surge-and-lull pulses rather than a constant drip feed.
+- **Nova HUD bar**: `NOVA` charge row added to HUD left panel (gold/white colouring). Panel height grows dynamically to 122px when streak row is also visible.
+
+**Logic Explanation:**
+
+- **'Juice' — Screen Shake** (Swink, 2008): Screen shake is the canonical example of "game feel" — a purely presentational effect that dramatically amplifies the perceived weight and impact of an ability. The shake here uses a **linearly decaying** random offset (multiplied by `shakeFrames / SHAKE_DURATION`) rather than a constant one, so the camera "settles" instead of cutting abruptly to rest. Using `ctx.save/translate/restore` keeps the implementation entirely within the draw pipeline with zero state leakage — transform state never persists between frames. Separating world shake from HUD stability is critical: a shaking health bar or score would be unreadable and feels broken, while a shaking world with a stable HUD communicates "the world is reacting" rather than "the UI is broken" (Swink, 2008:21).
+
+- **Ability Gating (cooldowns)**: `novaTimer` is a simple integer counter that increments each frame until it reaches `NOVA_COOLDOWN = 900`. `triggerNova()` returns immediately if `novaTimer < NOVA_COOLDOWN` — the gate is a single conditional rather than a state machine. This is the minimal viable implementation of "ability gating": restricting high-impact actions to a temporal budget so the player cannot spam them to trivialise difficulty (Swink, 2008:88). The `NOVA READY` floating text notification eliminates the need for constant clock-watching — the screen itself tells the player the ability is recharged.
+
+- **Combo design**: The 3s window (`COMBO_EXPIRE_FRAMES = 180`) was chosen as the minimum time in which a skilled player can chain two or three purifications in the current game speed. The exponential deceleration of floating text (`vy *= 0.96`) ensures the label lingers near the action point rather than flying off-screen, keeping it within the player's focus area without blocking gameplay.
+
+- **Pulse spawning rationale**: Capping at 15 and spawning 2 when under half-cap creates a self-regulating rhythm: enemies accumulate to cap → player clears a wave → count drops below 7 → two spawn simultaneously creating a mini-surge → repeat. This emergent pacing is more interesting than a constant drip and requires no explicit wave-burst timer.
+
+**AI Collaboration Note:** AI (Cursor / Claude) recommended the linearly decaying shake (`decay = shakeFrames / SHAKE_DURATION`) over constant-intensity shake, noting that a constant shake feels like lag rather than impact. AI also suggested `ctx.save/restore` wrapping rather than a coordinate-offset approach, as it is compositing-safe and handles lighting-layer blit correctly. AI proposed the `triggerShake` clamp pattern (take max intensity, take max duration) to prevent a weak secondary event from overriding an ongoing strong shake.
+
+---
+
+**References**
+
+Swink, S. 2008. *Game Feel: A Game Designer's Guide to Virtual Sensation*. Burlington: Morgan Kaufmann.
+
+Tulleken, H. 2015. *50 Tips for Better Game UI*. Gamasutra / Game Developer. Available at: https://www.gamedeveloper.com/design/50-tips-for-better-game-ui [Accessed 24 March 2026].
+
+Flanagan, D. 2020. *JavaScript: The Definitive Guide*. 7th ed. Sebastopol: O'Reilly Media.

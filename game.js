@@ -39,6 +39,20 @@ const SCOUT_MAX_RADIUS   = 400;   // px — maximum expansion of the ambient pul
 const SCOUT_FRAMES       = 50;    // frames to reach SCOUT_MAX_RADIUS
 const HERO_POINTER_DIST  = 280;   // px from centre — beyond this the edge arrow appears
 
+const NOVA_COOLDOWN      = 900;   // 15s at 60fps
+const NOVA_RADIUS        = 400;   // px — instant-vaporise blast radius
+const NOVA_SHAKE_INT     = 10;    // screen shake intensity units
+const NOVA_FLASH_FRAMES  = 30;    // white flash fades over this many frames (~0.5s)
+const REPEL_SHAKE_INT    = 4;     // screen shake intensity for Pulse Repel
+const SHAKE_DURATION     = 14;    // default shake duration in frames
+
+const COMBO_EXPIRE_FRAMES = 180;  // 3s window before combo resets
+const COMBO_STREAK_MIN    = 3;    // minimum cleans to trigger Lumen Streak
+const COMBO_STREAK_BONUS  = 0.5;  // fraction of lightRadius added during streak (+50%)
+
+const ENEMY_MAX_COUNT    = 15;    // maximum concurrent enemies on screen
+const FLOAT_LIFETIME     = 80;    // frames a FloatingText lives
+
 // ─── Upgrade Definitions ──────────────────────────────────────────────────────
 
 const UPGRADE_DEFS = [
@@ -47,6 +61,45 @@ const UPGRADE_DEFS = [
     { id: 'armor',   name: 'SPIRIT ARMOR',        stat: '+15%  Damage Resist',   lore: 'The Hero endures the darkness.',         icon: '⬡', color: '#7ecfff' },
     { id: 'healing', name: 'HEALING RESONANCE',   stat: '+20%  Orb Potency',     lore: 'Orbs resonate with greater force.',      icon: '❋', color: '#4cff91' },
 ];
+
+// ─── FloatingText ─────────────────────────────────────────────────────────────
+// Short-lived diegetic label that drifts upward and fades — used for score
+// popups, combo notifications, and ability announcements.
+
+class FloatingText {
+    constructor(x, y, text, color = '#00ffff', size = 14) {
+        this.x    = x;
+        this.y    = y;
+        this.text = text;
+        this.color = color;
+        this.size  = size;
+        this.vy   = -1.4;
+        this.life = 0;
+        this.dead = false;
+    }
+
+    update() {
+        this.y  += this.vy;
+        this.vy *= 0.96;   // decelerate — float slows to a hover before vanishing
+        this.life++;
+        if (this.life >= FLOAT_LIFETIME) this.dead = true;
+    }
+
+    draw(ctx) {
+        const alpha = Math.max(0, 1 - this.life / FLOAT_LIFETIME);
+        ctx.save();
+        ctx.globalAlpha  = alpha;
+        ctx.font         = `bold ${this.size}px "Courier New", monospace`;
+        ctx.fillStyle    = this.color;
+        ctx.textAlign    = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor  = this.color;
+        ctx.shadowBlur   = 10;
+        ctx.fillText(this.text, this.x, this.y);
+        ctx.shadowBlur   = 0;
+        ctx.restore();
+    }
+}
 
 // ─── Particle ─────────────────────────────────────────────────────────────────
 
@@ -87,11 +140,14 @@ class Particle {
 // Expanding ring visual spawned by Pulse Repel. Lifetime: ~18 frames.
 
 class ShockWave {
-    constructor(x, y) {
+    // maxRadius and color are optional — defaults produce the standard Repel ring.
+    // Nova passes NOVA_RADIUS and '#ffffff' to get a larger white-hot blast ring.
+    constructor(x, y, maxRadius = REPEL_RADIUS, color = '#00ffff') {
         this.x         = x;
         this.y         = y;
         this.radius    = 0;
-        this.maxRadius = REPEL_RADIUS;
+        this.maxRadius = maxRadius;
+        this.color     = color;
         this.done      = false;
     }
 
@@ -110,9 +166,9 @@ class ShockWave {
         ctx.globalAlpha = a * 0.9;
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-        ctx.strokeStyle = '#00ffff';
+        ctx.strokeStyle = this.color;
         ctx.lineWidth   = Math.max(0.5, 3.5 * a);
-        ctx.shadowColor = '#00ffff';
+        ctx.shadowColor = this.color;
         ctx.shadowBlur  = 24;
         ctx.stroke();
 
@@ -120,7 +176,7 @@ class ShockWave {
         ctx.globalAlpha = a * 0.4;
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.radius * 0.65, 0, Math.PI * 2);
-        ctx.strokeStyle = '#00ffff';
+        ctx.strokeStyle = this.color;
         ctx.lineWidth   = 1;
         ctx.shadowBlur  = 0;
         ctx.stroke();
@@ -183,9 +239,14 @@ class Player {
         this.radius             = PLAYER_RADIUS;
         this.lightRadius        = PLAYER_LIGHT_RADIUS;
         this.currentLightRadius = PLAYER_LIGHT_RADIUS;
-        this.orbitAngle = 0;
-        this.repelTimer = 0;   // starts uncharged; auto-fires after first 5s
-        this.trail      = []; // ring buffer of last TRAIL_LENGTH {x,y} positions
+        this.orbitAngle   = 0;
+        this.repelTimer   = 0;             // starts uncharged; auto-fires after first 5s
+        this.novaTimer    = NOVA_COOLDOWN; // starts ready on first game frame
+        this.trail        = [];            // ring buffer of last TRAIL_LENGTH {x,y} positions
+        this.comboCount   = 0;
+        this.comboTimer   = 0;
+        this.streakActive = false;
+        this.streakBonus  = 0;             // computed each frame from streak state
         // this.img is intentionally absent — resolved via Player.prototype.img after asset load
     }
 
@@ -198,12 +259,33 @@ class Player {
         this.y = mouseY;
         this.orbitAngle += 0.035;
 
+        // Combo window countdown — resets count and streak when expired
+        if (this.comboTimer > 0) {
+            this.comboTimer--;
+            if (this.comboTimer === 0) {
+                this.comboCount   = 0;
+                this.streakActive = false;
+            }
+        }
+
+        // Streak bonus: +50% light radius when combo streak is active
+        this.streakBonus = this.streakActive ? this.lightRadius * COMBO_STREAK_BONUS : 0;
         this.currentLightRadius =
-            this.lightRadius + Math.sin(game.time * PULSE_SPEED) * PULSE_AMPLITUDE;
+            this.lightRadius + this.streakBonus + Math.sin(game.time * PULSE_SPEED) * PULSE_AMPLITUDE;
 
         // Repel charge & auto-fire
         if (this.repelTimer < REPEL_COOLDOWN) this.repelTimer++;
         if (this.repelTimer >= REPEL_COOLDOWN) this.triggerRepel(game);
+
+        // Nova charge (no auto-fire — manual only)
+        if (this.novaTimer < NOVA_COOLDOWN) {
+            this.novaTimer++;
+            if (this.novaTimer === NOVA_COOLDOWN) {
+                game.floatingTexts.push(new FloatingText(
+                    this.x, this.y - 50, 'NOVA READY', '#ffffff', 13
+                ));
+            }
+        }
 
         for (let i = shadowPiles.length - 1; i >= 0; i--) {
             const pile = shadowPiles[i];
@@ -215,6 +297,26 @@ class Player {
                     game.healOrbs.push(new HealOrb(pile.x, pile.y));
                     game.score += SCORE_PER_PILE;
                     shadowPiles.splice(i, 1);
+
+                    // ── Combo logic ──────────────────────────────────────────
+                    this.comboCount++;
+                    this.comboTimer = COMBO_EXPIRE_FRAMES;
+
+                    game.floatingTexts.push(new FloatingText(
+                        pile.x, pile.y - 24, `+${SCORE_PER_PILE}`, '#b44fff'
+                    ));
+
+                    if (this.comboCount >= COMBO_STREAK_MIN) {
+                        if (!this.streakActive) {
+                            this.streakActive = true;
+                            game.floatingTexts.push(new FloatingText(
+                                this.x, this.y - 55, 'LUMEN STREAK!', '#ffffff', 16
+                            ));
+                        }
+                        game.floatingTexts.push(new FloatingText(
+                            pile.x, pile.y - 42, `×${this.comboCount} COMBO`, '#00ffff', 12
+                        ));
+                    }
                 }
             } else {
                 pile.hoverFrames = 0;
@@ -227,6 +329,7 @@ class Player {
     // total displacement over the stun window (geometric series: 15/(1-0.85) = 100).
     triggerRepel(game) {
         this.repelTimer = 0;
+        game.triggerShake(REPEL_SHAKE_INT, SHAKE_DURATION);
 
         game.shockWaves.push(new ShockWave(this.x, this.y));
 
@@ -252,10 +355,69 @@ class Player {
         }
     }
 
+    // Lumen Nova — instant 400px vaporise blast.  15s gated ability (F or click).
+    // White-hot shockwave + heavy screen shake + white flash communicates "panic button".
+    triggerNova(game) {
+        if (this.novaTimer < NOVA_COOLDOWN) return;
+        this.novaTimer = 0;
+
+        game.triggerShake(NOVA_SHAKE_INT, SHAKE_DURATION * 2);
+        game.flashFrames = NOVA_FLASH_FRAMES;
+
+        // Massive white shockwave ring
+        game.shockWaves.push(new ShockWave(this.x, this.y, NOVA_RADIUS, '#ffffff'));
+
+        // Radial white particle burst
+        for (let i = 0; i < 48; i++) {
+            const angle = (i / 48) * Math.PI * 2;
+            const p = new Particle(this.x, this.y, '#ffffff');
+            p.vx = Math.cos(angle) * (5 + Math.random() * 3);
+            p.vy = Math.sin(angle) * (5 + Math.random() * 3);
+            game.particles.push(p);
+        }
+
+        // Vaporise all non-dissolving enemies within NOVA_RADIUS
+        for (const enemy of game.enemies) {
+            if (enemy.dying) continue;
+            if (Math.hypot(this.x - enemy.x, this.y - enemy.y) < NOVA_RADIUS) {
+                // Micro burst at enemy position
+                for (let j = 0; j < 8; j++) {
+                    const p = new Particle(enemy.x, enemy.y, '#ffaa00');
+                    p.vx = (Math.random() - 0.5) * 5;
+                    p.vy = (Math.random() - 0.5) * 5;
+                    game.particles.push(p);
+                }
+                enemy.dying = true;
+            }
+        }
+
+        // Clean all shadow piles within NOVA_RADIUS (spawn orbs + score + combo)
+        for (let i = game.shadowPiles.length - 1; i >= 0; i--) {
+            const pile = game.shadowPiles[i];
+            if (Math.hypot(this.x - pile.x, this.y - pile.y) < NOVA_RADIUS) {
+                game.healOrbs.push(new HealOrb(pile.x, pile.y));
+                game.score += SCORE_PER_PILE;
+                game.floatingTexts.push(new FloatingText(pile.x, pile.y - 24, `+${SCORE_PER_PILE}`, '#ffffff'));
+
+                this.comboCount++;
+                this.comboTimer = COMBO_EXPIRE_FRAMES;
+                if (this.comboCount >= COMBO_STREAK_MIN && !this.streakActive) {
+                    this.streakActive = true;
+                }
+                game.shadowPiles.splice(i, 1);
+            }
+        }
+
+        game.floatingTexts.push(new FloatingText(this.x, this.y - 65, 'LUMEN NOVA!', '#ffffff', 18));
+    }
+
     // Draws fading cyan circles for the last TRAIL_LENGTH positions.
     // Opacity and radius both scale linearly with recency so the oldest dot is
     // almost invisible and the newest blends seamlessly into the core.
     drawTrail(ctx) {
+        // Trail colour shifts to white during Lumen Streak — visual cue that
+        // the player is in a boosted state.
+        const col = this.streakActive ? '#ffffff' : '#00ffff';
         const len = this.trail.length;
         for (let i = 0; i < len; i++) {
             const t     = (i + 1) / len;          // 0→1: oldest→newest
@@ -265,8 +427,8 @@ class Player {
             ctx.globalAlpha = alpha;
             ctx.beginPath();
             ctx.arc(this.trail[i].x, this.trail[i].y, r, 0, Math.PI * 2);
-            ctx.fillStyle   = '#00ffff';
-            ctx.shadowColor = '#00ffff';
+            ctx.fillStyle   = col;
+            ctx.shadowColor = col;
             ctx.shadowBlur  = 6;
             ctx.fill();
             ctx.shadowBlur  = 0;
@@ -915,11 +1077,19 @@ class Game {
                 this.restart();
             }
             if (e.key === ' ') {
-                e.preventDefault(); // prevent page scroll
+                e.preventDefault();
                 if (this.gameState === 'playing' && this.player.repelTimer >= REPEL_COOLDOWN) {
                     this.player.triggerRepel(this);
                 }
             }
+            if ((e.key === 'f' || e.key === 'F') && this.gameState === 'playing') {
+                this.player.triggerNova(this);
+            }
+        });
+
+        // Left-click also triggers Nova (ability-gated — won't fire if not charged)
+        this.canvas.addEventListener('click', () => {
+            if (this.gameState === 'playing') this.player.triggerNova(this);
         });
 
         this._loadAssets();
@@ -958,6 +1128,12 @@ class Game {
         this.assets = { player: playerImg, hero: heroImg, enemy: enemyImg };
     }
 
+    // Clamp to the largest requested shake so overlapping events don't cancel each other.
+    triggerShake(intensity, duration) {
+        if (intensity >= this.shakeIntensity) this.shakeIntensity = intensity;
+        if (duration  >  this.shakeFrames)    this.shakeFrames    = duration;
+    }
+
     _initEntities() {
         const cx = this.canvas.width  / 2;
         const cy = this.canvas.height / 2;
@@ -970,6 +1146,7 @@ class Game {
         this.particles     = [];
         this.shockWaves    = [];
         this.ambientPulses = [];
+        this.floatingTexts = [];
 
         this.score              = 0;
         this.wave               = 1;
@@ -981,6 +1158,11 @@ class Game {
         this.cleanFrames        = SHADOW_CLEAN_FRAMES;
         this.healValue          = HEAL_ORB_VALUE;
         this.upgrades           = { lumen: 0, purge: 0, armor: 0, healing: 0 };
+
+        this.shakeFrames    = 0;
+        this.shakeIntensity = 0;
+        this.flashFrames    = 0;         // white flash counter for Nova
+        this.damageShakeCooldown = 0;    // prevents per-frame spam when hero is swarmed
     }
 
     restart() {
@@ -997,17 +1179,25 @@ class Game {
     }
 
     spawnEnemy() {
-        const w    = this.canvas.width;
-        const h    = this.canvas.height;
-        const edge = Math.floor(Math.random() * 4);
-        let x, y;
+        if (this.enemies.length >= ENEMY_MAX_COUNT) return;
 
-        if      (edge === 0) { x = Math.random() * w; y = -20;    }
-        else if (edge === 1) { x = w + 20;             y = Math.random() * h; }
-        else if (edge === 2) { x = Math.random() * w; y = h + 20; }
-        else                 { x = -20;                y = Math.random() * h; }
+        // Pulse behaviour: when the field is sparse (< half cap), spawn 2 at once
+        // creating a wave-like surge that feels more intentional than a drip feed.
+        const count = this.enemies.length < Math.floor(ENEMY_MAX_COUNT / 2) ? 2 : 1;
 
-        this.enemies.push(new Enemy(x, y, this.currentEnemySpeed));
+        for (let s = 0; s < count && this.enemies.length < ENEMY_MAX_COUNT; s++) {
+            const w    = this.canvas.width;
+            const h    = this.canvas.height;
+            const edge = Math.floor(Math.random() * 4);
+            let x, y;
+
+            if      (edge === 0) { x = Math.random() * w; y = -20;    }
+            else if (edge === 1) { x = w + 20;             y = Math.random() * h; }
+            else if (edge === 2) { x = Math.random() * w; y = h + 20; }
+            else                 { x = -20;                y = Math.random() * h; }
+
+            this.enemies.push(new Enemy(x, y, this.currentEnemySpeed));
+        }
     }
 
     _tickWave() {
@@ -1042,7 +1232,16 @@ class Game {
         this.player.update(this.mouseX, this.mouseY, this.shadowPiles, this);
         this.hero.update(this.enemies, this.canvas.width / 2, this.canvas.height / 2);
 
+        // Track hero HP before enemy updates to detect damage events
+        const hpBefore = this.hero.hp;
         for (const enemy of this.enemies) enemy.update(this.hero);
+
+        // Brief screen shake when hero takes a hit (60-frame spam guard)
+        if (this.hero.hp < hpBefore && this.damageShakeCooldown <= 0) {
+            this.triggerShake(3, 8);
+            this.damageShakeCooldown = 60;
+        }
+        if (this.damageShakeCooldown > 0) this.damageShakeCooldown--;
 
         // Dead enemies (after dissolve completes) spawn ShadowPiles
         for (let i = this.enemies.length - 1; i >= 0; i--) {
@@ -1076,6 +1275,11 @@ class Game {
         for (let i = this.ambientPulses.length - 1; i >= 0; i--) {
             this.ambientPulses[i].update(this.shadowPiles);
             if (this.ambientPulses[i].done) this.ambientPulses.splice(i, 1);
+        }
+
+        for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
+            this.floatingTexts[i].update();
+            if (this.floatingTexts[i].dead) this.floatingTexts.splice(i, 1);
         }
 
         this.hero.hp = Math.max(0, this.hero.hp);
@@ -1140,13 +1344,18 @@ class Game {
         ctx.save();
         ctx.textBaseline = 'alphabetic';
 
-        // ── Left panel: Wave / Score / progress bar / repel charge ───────────
+        // ── Left panel: Wave / Score / progress bar / repel charge / nova ────
         const repelFrac  = Math.min(1, this.player.repelTimer / REPEL_COOLDOWN);
         const repelReady = repelFrac >= 1;
+        const novaFrac   = Math.min(1, this.player.novaTimer  / NOVA_COOLDOWN);
+        const novaReady  = novaFrac >= 1;
+        const streak     = this.player.streakActive;
 
+        // Panel height grows if streak is active (extra combo row)
+        const panelH = streak ? 122 : 102;
         ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
         ctx.beginPath();
-        ctx.roundRect(pad - 8, pad - 14, 148, 82, 6);
+        ctx.roundRect(pad - 8, pad - 14, 148, panelH, 6);
         ctx.fill();
 
         ctx.font      = `bold 13px ${font}`;
@@ -1182,6 +1391,37 @@ class Game {
         }
         ctx.fillRect(pad + 50, pad + 44, 70 * repelFrac, 3);
         ctx.shadowBlur = 0;
+
+        // Nova charge row
+        ctx.font      = `bold 11px ${font}`;
+        ctx.fillStyle = novaReady ? '#ffffff' : 'rgba(180, 160, 130, 0.65)';
+        ctx.fillText('NOVA', pad, pad + 72);
+
+        ctx.fillStyle = 'rgba(60, 60, 80, 0.5)';
+        ctx.fillRect(pad + 50, pad + 64, 70, 3);
+
+        if (novaReady) {
+            ctx.fillStyle   = '#ffffff';
+            ctx.shadowColor = '#ffe566';
+            ctx.shadowBlur  = 10;
+        } else {
+            ctx.fillStyle = 'rgba(180, 140, 60, 0.45)';
+        }
+        ctx.fillRect(pad + 50, pad + 64, 70 * novaFrac, 3);
+        ctx.shadowBlur = 0;
+
+        // Streak indicator row (only when active)
+        if (streak) {
+            const blinkA = 0.7 + 0.3 * Math.abs(Math.sin(this.time * 0.12));
+            ctx.font         = `bold 11px ${font}`;
+            ctx.globalAlpha  = blinkA;
+            ctx.fillStyle    = '#ffffff';
+            ctx.shadowColor  = '#ffffff';
+            ctx.shadowBlur   = 8;
+            ctx.fillText(`STREAK  ×${this.player.comboCount}`, pad, pad + 92);
+            ctx.shadowBlur   = 0;
+            ctx.globalAlpha  = 1;
+        }
 
         // ── Right panel: Upgrade indicators ──────────────────────────────────
         const BADGE_W   = 46;
@@ -1325,23 +1565,55 @@ class Game {
         ctx.fillStyle = '#1a1a1a';
         ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
+        // ── Screen shake ─────────────────────────────────────────────────────
+        // Apply a random offset to the world canvas each frame the shake is active.
+        // HUD, flash, and floating texts are drawn AFTER ctx.restore() so they stay
+        // anchored to the screen — only world geometry appears to judder (Swink, 2008).
+        let sx = 0, sy = 0;
+        if (this.shakeFrames > 0) {
+            const decay = this.shakeFrames / SHAKE_DURATION; // 1→0 linear falloff
+            sx = (Math.random() - 0.5) * 2 * this.shakeIntensity * decay;
+            sy = (Math.random() - 0.5) * 2 * this.shakeIntensity * decay;
+            this.shakeFrames--;
+            if (this.shakeFrames === 0) this.shakeIntensity = 0;
+        }
+        ctx.save();
+        ctx.translate(sx, sy);
+
         this.drawGrid();
 
-        // Draw order: particles → ambient pulses → shockwaves → piles → orbs → enemies → hero → trail → player
-        for (const p     of this.particles)    p.draw(ctx);
+        // Draw order: particles → ambient pulses → shockwaves → piles → orbs → enemies → hero → trail → player → lighting
+        for (const p     of this.particles)     p.draw(ctx);
         for (const ap    of this.ambientPulses) ap.draw(ctx);
-        for (const sw    of this.shockWaves)   sw.draw(ctx);
-        for (const pile  of this.shadowPiles)  pile.draw(ctx, this.cleanFrames, this.time);
-        for (const orb   of this.healOrbs)     orb.draw(ctx);
-        for (const e     of this.enemies)      e.draw(ctx);
+        for (const sw    of this.shockWaves)    sw.draw(ctx);
+        for (const pile  of this.shadowPiles)   pile.draw(ctx, this.cleanFrames, this.time);
+        for (const orb   of this.healOrbs)      orb.draw(ctx);
+        for (const e     of this.enemies)       e.draw(ctx);
         this.hero.draw(ctx);
         this.player.drawTrail(ctx);
         this.player.draw(ctx);
 
         this.drawLighting();
 
+        ctx.restore(); // end screen shake — HUD and overlays below are unshaken
+
+        // ── Nova white flash ─────────────────────────────────────────────────
+        if (this.flashFrames > 0) {
+            const fa = this.flashFrames / NOVA_FLASH_FRAMES;
+            ctx.save();
+            ctx.globalAlpha = fa * 0.80;
+            ctx.fillStyle   = '#ffffff';
+            ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+            ctx.restore();
+            this.flashFrames--;
+        }
+
         this.drawHUD();
         this.drawHeroPointer();
+
+        // Floating texts — drawn over HUD so they never disappear behind panels
+        for (const ft of this.floatingTexts) ft.draw(ctx);
+
         if (this.gameState === 'gameover') this.drawGameOver();
     }
 
