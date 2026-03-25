@@ -51,7 +51,43 @@
 
 ---
 
-## Milestone 3: Audio
+## Milestone 2.5: Power-Up Store
+
+| Task | Status |
+|---|---|
+| `UPGRADE_DEFS` catalogue — 4 named upgrades with stat descriptors | Complete |
+| `Store` class — builds DOM overlay once, `open()` / `hide()` lifecycle | Complete |
+| Fisher-Yates selection — 3 random upgrades from 4 shown per wave | Complete |
+| `backdrop-filter: blur(8px)` glass overlay with cyan card UI | Complete |
+| Card hover highlight via CSS `--card-color` custom property | Complete |
+| Stat application — `cleanFrames`, `healValue`, `damageResist`, `lightRadius` | Complete |
+| Game state `'store'` — simulation frozen while overlay is open | Complete |
+| `_resumeFromStore()` — increments wave, resets timers, restores `'playing'` | Complete |
+| Wave progress bar in HUD (shows time until next store appears) | Complete |
+| Top-right upgrade indicator panel in HUD (icon + level per stat) | Complete |
+
+---
+
+## Milestone 3: High-Fidelity Assets & Kinetic Mechanics
+
+| Task | Status |
+|---|---|
+| `drawSprite()` pattern on `Player`, `Hero`, `Enemy` — image load + procedural fallback | Complete |
+| Player 'Spark' — rotating cyan orbital flares + `'screen'` blend glow pass | Complete |
+| Hero 'Hooded Shadow' — dark cloak body, triangular hood peak, glowing teal eyes | Complete |
+| Enemy 'Shadow Wraith' — per-enemy flicker phase, wispy tendrils, red core | Complete |
+| `ShockWave` class — expanding cyan ring with inner echo, 18-frame lifetime | Complete |
+| `Pulse Repel` — auto-fires every 5s; Spacebar triggers when charged | Complete |
+| Enemy knockback — 15 px/frame impulse with 0.85 friction, ~100px displacement | Complete |
+| Enemy stun — 60-frame immobility window after knockback | Complete |
+| Stun ring indicator on enemies (cyan arc, fades as stun expires) | Complete |
+| Death dissolve — `dying` flag, 10-frame shrink+fade before ShadowPile spawn | Complete |
+| HealOrb `'screen'` blend glow pass for additive light-bleed | Complete |
+| Repel cooldown bar in left HUD panel | Complete |
+
+---
+
+## Milestone 4: Audio
 
 | Task | Status |
 |---|---|

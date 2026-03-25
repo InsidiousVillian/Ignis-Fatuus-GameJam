@@ -92,3 +92,105 @@ Rogers, S. 2010. *Level Up! The Guide to Great Video Game Design*. Chichester: J
 Adams, E. 2014. *Fundamentals of Game Design*. 3rd ed. Berkeley: New Riders.
 
 Nystrom, R. 2014. *Game Programming Patterns*. [Online]. Available at: https://gameprogrammingpatterns.com [Accessed 24 March 2026].
+
+---
+
+## Entry 005 — 2026-03-24
+
+**Feature Added:** Power-Up Store system — `Store` class, four named upgrades (`Lumen Pulse`, `Purge Speed`, `Spirit Armor`, `Healing Resonance`), DOM-based glass overlay with `backdrop-filter: blur(8px)`, top-right HUD upgrade panel, and wave-progress bar.
+
+**Logic Explanation:**
+
+- **`UPGRADE_DEFS` catalogue**: All upgrade data (id, display name, stat label, lore, icon, colour) is centralised in a single constant array. `Store.open()`, `Store._applyUpgrade()`, and the HUD panel all reference `UPGRADE_DEFS` as their single source of truth. This prevents the names, icons, and colours from drifting out of sync if an upgrade is renamed or recoloured (Nystrom, 2014:ch.2).
+
+- **Selection Bias (Fisher-Yates partial shuffle)**: Rather than picking 3 upgrades with replacement, `Store.open()` clones `UPGRADE_DEFS` into a local pool and splices a random element out on each of 3 iterations. This guarantees no duplicates within a single offer and ensures exactly one upgrade is excluded per wave. The excluded upgrade varies each wave, which creates a "scarcity frame" — the player perceives the missing option as meaningful and feels pressure to take one of the three shown (Schell, 2019:175). This is preferable to a flat random-with-replacement roll, which could offer the same upgrade twice and dilute player agency.
+
+- **Stat Scaling Architecture**: Rather than modifying class constants (which are frozen at runtime), each scalable stat is stored as a mutable instance variable on `Game`: `cleanFrames` (Purge Speed), `healValue` (Healing Resonance), `hero.damageResist` (Spirit Armor), and `player.lightRadius` (Lumen Pulse). `Player.update()` reads `game.cleanFrames`; `HealOrb.update()` reads `game.healValue`; `Enemy.update()` reads `hero.damageResist`. No class needs a reference to `Game` it didn't already have. This "stat bus on the host object" pattern avoids global mutable state while keeping the upgrade application logic entirely within `Store._applyUpgrade()` (Adams, 2014:196). Upgrade level counts are stored separately in `game.upgrades` so the HUD can display progression without reverse-engineering values from multiplied floats.
+
+- **Spirit Armor damage formula**: Contact damage is `0.08 × (1 − hero.damageResist)`. With 5 upgrades (maximum 0.75 resistance), damage per contact frame drops from `0.08` to `0.02`. The hard cap at `0.75` ensures the Hero can never achieve full immunity — preserving the game's tension even at maximum investment (Schell, 2019:201).
+
+- **Healing Resonance compound scaling**: Each pick multiplies `healValue` by `1.2` rather than adding a flat amount. This means the first pick raises base 20 → 24 (modest), while the fifth pick raises 41 → 49 (significant). Compound growth rewards committing to a single build path, a recognised progression design technique (Schell, 2019:196).
+
+- **DOM overlay vs Canvas overlay**: The upgrade UI is a fixed-position `<div>` injected into `<body>`, not drawn on the canvas. This is the correct approach for two reasons: (1) `backdrop-filter: blur()` requires a real composited DOM layer to sample pixels from beneath — it has no canvas equivalent; (2) HTML/CSS handles hover states, cursor pointer, transitions, and click events natively, eliminating ~80 lines of manual canvas hit-testing code. The canvas and DOM are composited by the browser's rendering pipeline, which handles this separation transparently (MDN Web Docs, 2024).
+
+- **`'store'` game state**: When `_tickWave()` fires, `gameState` is set to `'store'` before calling `Store.open()`. Because `update()` returns early whenever `gameState !== 'playing'`, the entire simulation freezes while the store is open. The canvas loop continues running (RAF never stops), so the last rendered frame stays visible beneath the blurred overlay. `_resumeFromStore()` increments the wave counter and restores `'playing'`, decoupling the upgrade selection event from the wave-counter logic.
+
+- **Wave progress bar**: A thin cyan `fillRect` in `drawHUD()` maps `waveTimer / WAVE_DURATION_FRAMES` to a 130px horizontal bar. This gives the player a passive visual cue of when the next store will appear without requiring a countdown number, keeping the HUD minimal.
+
+**AI Collaboration Note:** AI (Cursor / Claude) recommended using a DOM overlay rather than drawing the store UI on the canvas, specifically because `backdrop-filter` requires a composited DOM layer and CSS hover states eliminate manual hit-testing. AI also suggested the compound × 1.2 scaling for Healing Resonance over a flat +4 per pick, arguing that compound growth creates a more meaningful "build commitment" decision for the player.
+
+---
+
+**References**
+
+Adams, E. 2014. *Fundamentals of Game Design*. 3rd ed. Berkeley: New Riders.
+
+MDN Web Docs. 2024. *backdrop-filter — CSS: Cascading Style Sheets*. [Online]. Available at: https://developer.mozilla.org/en-US/docs/Web/CSS/backdrop-filter [Accessed 24 March 2026].
+
+Schell, J. 2019. *The Art of Game Design: A Book of Lenses*. 3rd ed. Boca Raton: CRC Press.
+
+---
+
+## Entry 006 — 2026-03-24
+
+**Feature Added:** `drawSprite()` sprite fallback system; Player 'Spark' orbital flares with `'screen'` blend glow; Hero 'Hooded Shadow' procedural sprite; Enemy 'Shadow Wraith' with per-enemy flicker and tendrils; `ShockWave` class; `Pulse Repel` mechanic (auto + Spacebar); enemy knockback + stun; death dissolve animation; HealOrb `'screen'` blend glow; repel charge bar in HUD.
+
+**Logic Explanation:**
+
+- **`drawSprite()` fallback pattern**: Each entity (`Player`, `Hero`, `Enemy`) stores `this.img = null`. `drawSprite(ctx)` first checks `this.img && this.img.complete && this.img.naturalWidth > 0` — the standard browser test for a fully loaded `HTMLImageElement`. If true it calls `ctx.drawImage()`; if false it calls `_drawProcedural(ctx)`. Since no sprite files exist in this build, `_drawProcedural()` always runs, but swapping in any asset is a single-line change: `entity.img = loadedImage`. This pattern is standard practice for graceful asset degradation in canvas games (Ahearn, 2017:88).
+
+- **`globalCompositeOperation = 'screen'`**: The `'screen'` blend mode mathematically inverts both the source and destination pixel values, multiplies them, then inverts the result: `1 - (1-src)(1-dst)`. On a near-black background (`#1a1a1a`), this approximates simple additive blending — the bright cyan and green glows of the Player and HealOrbs "burn" against the darkness without clipping to pure white. This creates the high-contrast light-bleed effect described by Ahearn (2017:212) for achieving a "glow-in-the-dark" look in dark-background games. `ctx.save()` / `ctx.restore()` sandboxes the composite mode so it never contaminates subsequent draw calls.
+
+- **Rotating orbital flares**: `this.orbitAngle` increments by `0.035` radians per frame (≈ 2°/frame, one full rotation every ~180 frames / 3 seconds). Two `arc()` calls at opposite rotations (`ctx.rotate(Math.PI)` between them) create a counter-rotating pair of partial arcs, giving the Spark a dynamic gyroscopic appearance without requiring any trigonometric path reconstruction per frame.
+
+- **Kinetic Repel — knockback physics**: When `triggerRepel()` fires, each enemy within `REPEL_RADIUS` (150px) receives an initial velocity impulse of `15 × (1 - dist/REPEL_RADIUS)` px/frame in the radial-outward direction. A friction coefficient of `0.85` is applied each frame in `Enemy.update()`: `knockbackVx *= 0.85`. The geometric series sum of a sequence starting at `v₀ = 15` with ratio `0.85` converges to `v₀ / (1 - 0.85) = 100` — so an enemy at the epicenter receives approximately 100px of total displacement before the knockback decays to zero. This is the "Crowd Control" displacement design described by Despain (2012:94): a short, bounded velocity burst that creates a temporary safe zone without permanently removing enemies from the encounter.
+
+- **Stun window (`REPEL_STUN_FRAMES = 60`)**: While `stunFrames > 0`, `Enemy.update()` skips the normal movement and damage logic entirely, applying only the decelerating knockback vector. A cyan ring drawn around the enemy (opacity fades as `stunFrames / 20`, fully opaque for the first 20 frames) gives the player clear visual feedback that the stun window is active and indicates when it will expire (Despain, 2012:97).
+
+- **Death dissolve**: Rather than removing enemies instantly, `Hero.update()` now sets `nearest.dying = true` instead of `nearest.dead = true`. `Enemy.update()` increments `dyingFrames` each frame while `dying` is true, computing `alpha = 1 - dyingFrames / 10` (linear fade over 10 frames). Both `ctx.globalAlpha` and `ctx.scale(alpha, alpha)` are applied inside a `ctx.save()` block, producing a simultaneous shrink and fade. `dead` is only set to `true` once `dyingFrames >= 10`, at which point `Game.update()` spawns the `ShadowPile` and removes the enemy from the array. Hero.update() ignores enemies with `dying = true` as chase targets, preventing the Hero from attacking a dissolving enemy.
+
+- **`ShockWave` class**: Expands from radius 0 to `REPEL_RADIUS` over 18 frames (`+radius/18` per frame). A computed `alpha` property (`1 - radius/maxRadius`) drives both `globalAlpha` and `lineWidth`, so the ring simultaneously fades and thins as it expands — mimicking the physical attenuation of a pressure wave (Ahearn, 2017:198). An inner echo ring at `0.65×` the main radius adds depth.
+
+- **Hero target filtering**: `Hero.update()` now skips `enemy.dying` entries when scanning for the nearest target (`if (enemy.dying) continue`). This prevents the Hero from "chasing" a dissolving corpse and then standing idle mid-field waiting for it to finish dying.
+
+**AI Collaboration Note:** AI (Cursor / Claude) suggested using `ctx.scale(alpha, alpha)` inside a `ctx.translate(enemy.x, enemy.y)` block rather than re-computing the enemy's offset position for the dissolve, noting it produces a cleaner centred shrink. AI also recommended the `screen` blend mode over `lighter` for the glow pass, explaining that `lighter` can clip to white on overlapping entities while `screen` never exceeds the source colour.
+
+---
+
+**References**
+
+Ahearn, L. 2017. *3D Game Textures: Create Professional Game Art Using Photoshop*. 4th ed. Boca Raton: CRC Press.
+
+Despain, W. (ed.) 2012. *100 Principles of Game Design*. Berkeley: New Riders.
+
+---
+
+## Entry 007 — Asset Pre-loading & Prototype-based Image Sharing
+**Date:** 2026-03-24 | **Milestone:** 3.5 — Asset Loader
+
+**Features Added:**
+- `Game._loadAssets()` — pre-loads `assets/player.png`, `assets/hero.png`, and `assets/enemy.png` at construction time.
+- Prototype assignment pattern: each loaded image is stored on the class prototype (`Player.prototype.img`, `Hero.prototype.img`, `Enemy.prototype.img`) rather than on individual instances.
+- Removed `this.img = null` from `Player`, `Hero`, and `Enemy` constructors (instance property was shadowing the prototype and preventing prototype resolution).
+- Graceful `onerror` handlers emit a console warning and keep the procedural fallback active if a PNG is missing.
+- `drawSprite()` on all three classes now supports a three-layer render pipeline: (1) magical overlay effects always drawn, (2) sprite or procedural fallback body, (3) further overlays (orbital flares, teal eyes, red core glow) always drawn on top.
+
+**Logic Explanation:**
+
+- **Asset pre-loading strategy**: `_loadAssets()` calls `new Image()` and sets `img.src` for each asset. The browser decodes images asynchronously; the game starts immediately using procedural renderers as the fallback. Once an `onload` callback fires, the image is bound to the prototype and all instances start rendering the sprite on the next frame — no restart or re-initialisation required.
+
+- **Prototype vs. instance memory**: In JavaScript, an own property on an instance shadows a same-named property on its prototype. Setting `this.img = null` in the constructor created an own property that always resolved to `null`, regardless of what was later set on the prototype. By removing those own properties, `this.img` now traverses the prototype chain and finds the loaded `HTMLImageElement` after `onload`. This means a single decoded image bitmap is shared across all `Enemy` instances — there is never more than one copy of the raster data in memory, regardless of how many enemies are active on screen. This is the prototype-chain memory pattern described by Flanagan (2020:214): prototype properties act as class-level shared state with zero redundancy at the instance level.
+
+- **Three-layer draw pipeline for Player**: (1) Screen-blend cyan radial glow is drawn first with `globalCompositeOperation = 'screen'` — this provides additive light-bleed that looks identical whether the core is a PNG or a procedural warm circle. (2) The sprite (sized at `radius × 4.5`) replaces only the body layer — the procedural warm halo and yellow core are the fallback for this slot only. (3) Rotating orbital flare arcs are always painted last so they animate over any sprite artwork, preserving the "magical Spark" identity even with photorealistic assets.
+
+- **Hero overlay pipeline**: When a sprite is present, the `drawSprite()` path draws the hood PNG then calls `_drawEyes()` and `_drawHealthBar()` as separate overlay passes — extracted from `_drawProcedural()` into dedicated helpers so both paths share identical eye-glow and bar logic without duplication.
+
+- **Enemy overlay pipeline**: When a sprite is present, the dissolve transform (`ctx.globalAlpha = this.alpha; ctx.scale(scale, scale)`) is applied only to the sprite draw call itself, keeping pips and stun ring unaffected by the fade. The pulsing red core glow overlay (`rgba(200, 20, 0, 0.55)` with `shadowBlur: 16`) is added on top of the sprite to maintain visual identity. HP pips and stun ring use shared `_drawPips()` and `_drawStunRing()` helpers called from both sprite and procedural paths.
+
+**AI Collaboration Note:** AI (Cursor / Claude) identified the critical shadowing issue — `this.img = null` in constructors was silently preventing prototype resolution. AI recommended removing the instance assignment entirely and documenting the prototype chain behaviour, rather than iterating active instances on `onload` (which would miss future instances and be O(n) at load time). AI also suggested sizing the Player sprite at `radius × 4.5` to encompass the orbital flare ring area, preventing the sprite from being clipped inside the animation.
+
+---
+
+**References**
+
+Flanagan, D. 2020. *JavaScript: The Definitive Guide*. 7th ed. Sebastopol: O'Reilly Media.
