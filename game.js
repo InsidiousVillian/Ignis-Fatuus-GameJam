@@ -33,6 +33,12 @@ const GRID_SIZE      = 60;
 const GRID_PARALLAX  = 0.04;
 const GRID_OPACITY   = 0.07;
 
+const TRAIL_LENGTH       = 10;    // number of past positions kept for the luminous tail
+const SCOUT_INTERVAL     = 120;   // frames between passive sonar pulses (2s at 60fps)
+const SCOUT_MAX_RADIUS   = 400;   // px — maximum expansion of the ambient pulse ring
+const SCOUT_FRAMES       = 50;    // frames to reach SCOUT_MAX_RADIUS
+const HERO_POINTER_DIST  = 280;   // px from centre — beyond this the edge arrow appears
+
 // ─── Upgrade Definitions ──────────────────────────────────────────────────────
 
 const UPGRADE_DEFS = [
@@ -123,6 +129,50 @@ class ShockWave {
     }
 }
 
+// ─── AmbientPulse ─────────────────────────────────────────────────────────────
+// Passive 'sonar' ring that expands from the Player position every SCOUT_INTERVAL
+// frames. When the wavefront passes over a ShadowPile it temporarily boosts that
+// pile's glowBoost, creating a brief 'ping' of illumination.
+
+class AmbientPulse {
+    constructor(x, y) {
+        this.x      = x;
+        this.y      = y;
+        this.radius = 0;
+        this.done   = false;
+    }
+
+    update(shadowPiles) {
+        this.radius += SCOUT_MAX_RADIUS / SCOUT_FRAMES;
+
+        // Wavefront width ≈ 24px — boost any pile the ring is passing over
+        for (const pile of shadowPiles) {
+            const dist = Math.hypot(this.x - pile.x, this.y - pile.y);
+            const proximity = 1 - Math.abs(dist - this.radius) / 24;
+            if (proximity > 0) pile.glowBoost = Math.max(pile.glowBoost, proximity);
+        }
+
+        if (this.radius >= SCOUT_MAX_RADIUS) this.done = true;
+    }
+
+    draw(ctx) {
+        const t = this.radius / SCOUT_MAX_RADIUS; // 0→1
+        if (t >= 1) return;
+
+        ctx.save();
+        ctx.globalAlpha = (1 - t) * 0.45;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.strokeStyle = '#00ffff';
+        ctx.lineWidth   = 1;
+        ctx.shadowColor = '#00ffff';
+        ctx.shadowBlur  = 10;
+        ctx.stroke();
+        ctx.shadowBlur  = 0;
+        ctx.restore();
+    }
+}
+
 // ─── Player ───────────────────────────────────────────────────────────────────
 // 'The Spark' — a cyan high-intensity core with a rotating orbital flare.
 
@@ -135,10 +185,15 @@ class Player {
         this.currentLightRadius = PLAYER_LIGHT_RADIUS;
         this.orbitAngle = 0;
         this.repelTimer = 0;   // starts uncharged; auto-fires after first 5s
+        this.trail      = []; // ring buffer of last TRAIL_LENGTH {x,y} positions
         // this.img is intentionally absent — resolved via Player.prototype.img after asset load
     }
 
     update(mouseX, mouseY, shadowPiles, game) {
+        // Record previous position before moving (persistence-of-vision trail)
+        this.trail.push({ x: this.x, y: this.y });
+        if (this.trail.length > TRAIL_LENGTH) this.trail.shift();
+
         this.x = mouseX;
         this.y = mouseY;
         this.orbitAngle += 0.035;
@@ -194,6 +249,28 @@ class Player {
                 enemy.knockbackVy = Math.sin(angle) * 15 * factor;
                 enemy.stunFrames  = REPEL_STUN_FRAMES;
             }
+        }
+    }
+
+    // Draws fading cyan circles for the last TRAIL_LENGTH positions.
+    // Opacity and radius both scale linearly with recency so the oldest dot is
+    // almost invisible and the newest blends seamlessly into the core.
+    drawTrail(ctx) {
+        const len = this.trail.length;
+        for (let i = 0; i < len; i++) {
+            const t     = (i + 1) / len;          // 0→1: oldest→newest
+            const alpha = t * 0.38;
+            const r     = this.radius * (0.25 + t * 0.65);
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            ctx.beginPath();
+            ctx.arc(this.trail[i].x, this.trail[i].y, r, 0, Math.PI * 2);
+            ctx.fillStyle   = '#00ffff';
+            ctx.shadowColor = '#00ffff';
+            ctx.shadowBlur  = 6;
+            ctx.fill();
+            ctx.shadowBlur  = 0;
+            ctx.restore();
         }
     }
 
@@ -631,11 +708,33 @@ class ShadowPile {
         this.y           = y;
         this.radius      = 18;
         this.hoverFrames = 0;
+        this.glowBoost   = 0;   // 0→1, temporarily raised when an AmbientPulse passes over
     }
 
-    draw(ctx, cleanFrames) {
+    // time is game.time — drives the slow idle sine oscillation
+    draw(ctx, cleanFrames, time) {
         const progress = this.hoverFrames / cleanFrames;
 
+        // Decay glowBoost toward zero each frame
+        if (this.glowBoost > 0) this.glowBoost = Math.max(0, this.glowBoost - 0.03);
+
+        // ── Permanent ambient glow halo behind the pile ───────────────────────
+        // Slow sine oscillation (period ≈ 7s) + brief boost from scout ping
+        const idlePulse   = 0.12 + Math.abs(Math.sin(time * 0.027 + this.x * 0.008)) * 0.08;
+        const totalAlpha  = idlePulse + this.glowBoost * 0.40;
+        const totalBlur   = 8 + this.glowBoost * 18;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius + 7, 0, Math.PI * 2);
+        ctx.fillStyle   = `rgba(0, 255, 200, ${totalAlpha})`;
+        ctx.shadowColor = 'rgba(0, 255, 200, 0.7)';
+        ctx.shadowBlur  = totalBlur;
+        ctx.fill();
+        ctx.shadowBlur  = 0;
+        ctx.restore();
+
+        // ── Dark body ─────────────────────────────────────────────────────────
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
         ctx.fillStyle = 'rgba(20, 5, 30, 0.88)';
@@ -644,6 +743,7 @@ class ShadowPile {
         ctx.lineWidth   = 1.5;
         ctx.stroke();
 
+        // ── Purification progress arc ─────────────────────────────────────────
         if (progress > 0) {
             ctx.beginPath();
             ctx.arc(
@@ -862,18 +962,20 @@ class Game {
         const cx = this.canvas.width  / 2;
         const cy = this.canvas.height / 2;
 
-        this.player      = new Player(this.canvas);
-        this.hero        = new Hero(cx, cy);
-        this.enemies     = [];
-        this.shadowPiles = [];
-        this.healOrbs    = [];
-        this.particles   = [];
-        this.shockWaves  = [];
+        this.player        = new Player(this.canvas);
+        this.hero          = new Hero(cx, cy);
+        this.enemies       = [];
+        this.shadowPiles   = [];
+        this.healOrbs      = [];
+        this.particles     = [];
+        this.shockWaves    = [];
+        this.ambientPulses = [];
 
         this.score              = 0;
         this.wave               = 1;
         this.waveTimer          = 0;
         this.spawnTimer         = 0;
+        this.scoutTimer         = 0;
         this.currentSpawnFrames = ENEMY_SPAWN_FRAMES;
         this.currentEnemySpeed  = ENEMY_BASE_SPEED;
         this.cleanFrames        = SHADOW_CLEAN_FRAMES;
@@ -963,6 +1065,17 @@ class Game {
         for (let i = this.shockWaves.length - 1; i >= 0; i--) {
             this.shockWaves[i].update();
             if (this.shockWaves[i].done) this.shockWaves.splice(i, 1);
+        }
+
+        // Passive sonar — spawn a new AmbientPulse every SCOUT_INTERVAL frames
+        this.scoutTimer++;
+        if (this.scoutTimer >= SCOUT_INTERVAL) {
+            this.scoutTimer = 0;
+            this.ambientPulses.push(new AmbientPulse(this.player.x, this.player.y));
+        }
+        for (let i = this.ambientPulses.length - 1; i >= 0; i--) {
+            this.ambientPulses[i].update(this.shadowPiles);
+            if (this.ambientPulses[i].done) this.ambientPulses.splice(i, 1);
         }
 
         this.hero.hp = Math.max(0, this.hero.hp);
@@ -1145,6 +1258,66 @@ class Game {
         ctx.restore();
     }
 
+    // Draws a small cyan arrow at the viewport edge pointing toward the Hero
+    // when they wander beyond HERO_POINTER_DIST from the screen centre.
+    // The clamping uses the viewport-rectangle projection (min-t method) so the
+    // arrow always hugs the nearest screen edge, not just a circle boundary.
+    drawHeroPointer() {
+        const { hero, canvas, ctx } = this;
+        const cx = canvas.width  / 2;
+        const cy = canvas.height / 2;
+        const dx = hero.x - cx;
+        const dy = hero.y - cy;
+        const dist = Math.hypot(dx, dy);
+
+        if (dist < HERO_POINTER_DIST) return;
+
+        const margin = 30;
+        const halfW  = canvas.width  / 2 - margin;
+        const halfH  = canvas.height / 2 - margin;
+
+        // Project direction onto rectangle edge
+        const nx    = dx / dist;
+        const ny    = dy / dist;
+        const scale = Math.min(halfW / (Math.abs(nx) || 0.001), halfH / (Math.abs(ny) || 0.001));
+        const ax    = cx + nx * scale;
+        const ay    = cy + ny * scale;
+
+        const angle      = Math.atan2(dy, dx);
+        const blinkAlpha = 0.55 + 0.45 * Math.abs(Math.sin(this.time * 0.07));
+        const sz         = 9;
+
+        ctx.save();
+        ctx.globalAlpha = blinkAlpha;
+        ctx.translate(ax, ay);
+        ctx.rotate(angle);
+
+        // Filled arrowhead
+        ctx.beginPath();
+        ctx.moveTo(sz,       0);
+        ctx.lineTo(-sz * 0.6, -sz * 0.65);
+        ctx.lineTo(-sz * 0.6,  sz * 0.65);
+        ctx.closePath();
+        ctx.fillStyle   = '#00ffff';
+        ctx.shadowColor = '#00ffff';
+        ctx.shadowBlur  = 12;
+        ctx.fill();
+
+        // Small label beneath the arrow when far (> 2× threshold)
+        if (dist > HERO_POINTER_DIST * 2) {
+            ctx.rotate(-angle);
+            ctx.font         = 'bold 9px "Courier New", monospace';
+            ctx.textAlign    = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillStyle    = 'rgba(0, 255, 255, 0.75)';
+            ctx.shadowBlur   = 0;
+            ctx.fillText('HERO', 0, sz + 4);
+        }
+
+        ctx.shadowBlur = 0;
+        ctx.restore();
+    }
+
     draw() {
         const ctx = this.ctx;
         ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -1154,18 +1327,21 @@ class Game {
 
         this.drawGrid();
 
-        // Draw order: particles → shockwaves → piles → orbs → enemies → hero → player
-        for (const p    of this.particles)   p.draw(ctx);
-        for (const sw   of this.shockWaves)  sw.draw(ctx);
-        for (const pile of this.shadowPiles) pile.draw(ctx, this.cleanFrames);
-        for (const orb  of this.healOrbs)    orb.draw(ctx);
-        for (const e    of this.enemies)     e.draw(ctx);
+        // Draw order: particles → ambient pulses → shockwaves → piles → orbs → enemies → hero → trail → player
+        for (const p     of this.particles)    p.draw(ctx);
+        for (const ap    of this.ambientPulses) ap.draw(ctx);
+        for (const sw    of this.shockWaves)   sw.draw(ctx);
+        for (const pile  of this.shadowPiles)  pile.draw(ctx, this.cleanFrames, this.time);
+        for (const orb   of this.healOrbs)     orb.draw(ctx);
+        for (const e     of this.enemies)      e.draw(ctx);
         this.hero.draw(ctx);
+        this.player.drawTrail(ctx);
         this.player.draw(ctx);
 
         this.drawLighting();
 
         this.drawHUD();
+        this.drawHeroPointer();
         if (this.gameState === 'gameover') this.drawGameOver();
     }
 

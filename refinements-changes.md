@@ -194,3 +194,34 @@ Despain, W. (ed.) 2012. *100 Principles of Game Design*. Berkeley: New Riders.
 **References**
 
 Flanagan, D. 2020. *JavaScript: The Definitive Guide*. 7th ed. Sebastopol: O'Reilly Media.
+
+---
+
+## Entry 008 — Luminous Trail, Ambient Pulse Scout, Pile Glow, and Hero Pointer
+**Date:** 2026-03-24 | **Milestone:** 4 — Visibility & Navigation Feedback
+
+**Features Added:**
+- **Luminous Trail**: Player records the last 10 positions in a ring buffer; `drawTrail()` renders fading cyan circles before the main Spark, creating a persistence-of-vision comet tail.
+- **Ambient Pulse ('Scout')**: `AmbientPulse` class — a thin cyan ring emitted from the Player every 120 frames that expands to 400px over 50 frames. When the wavefront passes over a `ShadowPile`, it temporarily boosts that pile's `glowBoost` property.
+- **Objective Clarity**: `ShadowPile` now has a permanent ambient glow halo (`rgba(0, 255, 200, α)`) that oscillates slowly via `Math.sin(time * 0.027)`. When `glowBoost > 0` (from a Scout ping), the glow alpha and `shadowBlur` both spike before decaying back to idle.
+- **Hero Pointer**: `drawHeroPointer()` uses viewport-rectangle projection to place a blinking cyan arrowhead at the nearest screen edge when the Hero is more than 280px from the screen centre. A small "HERO" label appears when the distance exceeds 560px.
+
+**Logic Explanation:**
+
+- **Persistence-of-vision trail**: The trail stores positions *before* the player moves, so the oldest dot is at the previous mouse location and the newest blends into the current core. Both opacity (`t × 0.38`) and radius (`radius × (0.25 + t × 0.65)`) scale linearly with recency index `t = (i+1)/len`, making the tail appear to emerge from the core rather than floating beside it. This design is grounded in the "persistence of vision" principle — brief afterimages that the human visual system integrates into a perceived direction of motion (Tulleken, 2015:38). In a dark scene where the cursor may be lost against the background, the trail provides a consistent directional read without increasing the main character's footprint.
+
+- **Passive sonar mechanic**: The `AmbientPulse` ring mimics a radar/sonar sweep. The wavefront width is 24px; any `ShadowPile` whose distance from the pulse origin is within 24px of the current radius receives a `glowBoost` proportional to its proximity to the centre of the wavefront (`1 - |dist - radius| / 24`). The boost decays by 0.03 per frame in `ShadowPile.draw()` — approximately 33 frames (0.5s) from full brightness to zero. This creates a brief, spatially-accurate "ping" that reveals pile positions without permanently removing the darkness mechanic. The sonar metaphor communicates the player's limited but periodic knowledge of the game state, a form of "dynamic fog of war" referenced in Tulleken (2015:14) as a navigation tension tool.
+
+- **ShadowPile idle glow**: The permanent glow uses a per-pile phase offset (`this.x * 0.008`) so adjacent piles oscillate slightly out of sync, preventing a distracting uniform flash across the screen. The base alpha is `0.12–0.20`, low enough to remain subtle against `#1a1a1a` but sufficient to distinguish piles from the parallax grid.
+
+- **Hero Pointer — rectangle projection**: A simple circle-clamp would place the arrow off-screen on widescreen viewports when the hero is more directly left/right than the 16:9 diagonal allows. The min-t method (`scale = min(halfW / |nx|, halfH / |ny|)`) finds the exact intersection of the direction ray with the rectangular viewport boundary, ensuring the arrow always appears at the edge rather than beyond it. The arrow blinks with `0.55 + 0.45 × |sin(time × 0.07)|` — a 1.5s period — to attract peripheral attention without being distracting when already visible to the player (Tulleken, 2015:52).
+
+**AI Collaboration Note:** AI (Cursor / Claude) suggested storing trail positions *before* the positional update (not after), so the newest tail dot lags behind the current spark and the oldest is farthest away — the correct visual order. AI also recommended the rectangle-projection formula over a circle-clamped approach for the Hero Pointer, noting that circular clamping places the indicator inside the viewport on wide displays, making it appear floating mid-screen rather than at the edge.
+
+---
+
+**References**
+
+Tulleken, H. 2015. *50 Tips for Better Game UI*. Gamasutra / Game Developer. Available at: https://www.gamedeveloper.com/design/50-tips-for-better-game-ui [Accessed 24 March 2026].
+
+Flanagan, D. 2020. *JavaScript: The Definitive Guide*. 7th ed. Sebastopol: O'Reilly Media.
