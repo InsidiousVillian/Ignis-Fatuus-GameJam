@@ -27,9 +27,11 @@
 
 | Task | Status |
 |---|---|
-| Pulse effect on Player light radius (Sine wave) | Pending |
-| Particle trail system for HealOrbs | Pending |
-| Background grid pattern to imply movement | Pending |
+| Pulse effect on Player light radius (Sine wave) | Complete |
+| Particle trail system for HealOrbs | Complete |
+| `Health Ghosting` effect on Hero HP bar | Complete |
+| Background grid pattern to imply movement (parallax) | Complete |
+| Dynamic `shadowBlur` glow on Player Spark & HealOrbs | Complete |
 | Sprite/asset replacement (AI-generated) | Pending |
 
 ---
