@@ -23,6 +23,21 @@
 
 ---
 
+## Milestone 1.5: Game Loop & Progression
+
+| Task | Status |
+|---|---|
+| Wave counter — increments every 30 seconds | Complete |
+| Scaling difficulty — enemy speed & spawn rate increase per wave | Complete |
+| `score` variable — +100 per Shadow Pile purified | Complete |
+| HUD overlay — Wave and Score displayed at top-left | Complete |
+| Hero `wandering` state — drifts to center when no enemies exist | Complete |
+| Game Over state — triggers when Hero HP reaches 0 | Complete |
+| Game Over overlay — score, wave reached, 'R to Restart' prompt | Complete |
+| `restart()` method — full entity reset, preserves canvas & loop | Complete |
+
+---
+
 ## Milestone 2: Visual Polish
 
 | Task | Status |
