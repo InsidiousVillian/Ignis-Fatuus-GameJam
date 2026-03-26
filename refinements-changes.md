@@ -497,3 +497,119 @@ Isbister, K. 2016. *How Games Move Us: Emotion by Design*. Cambridge, MA: MIT Pr
 Nystrom, R. 2014. *Game Programming Patterns*. [Online]. Available at: https://gameprogrammingpatterns.com [Accessed 25 March 2026].
 
 Rogers, S. 2014. *Level Up! The Guide to Great Video Game Design*. 2nd ed. Chichester: John Wiley & Sons.
+
+---
+
+## Entry 016 — Wraith Prime Elite Encounter and Boss UI
+
+**Date:** 26 March 2026
+
+**Feature summary:** Implemented the WraithPrime elite boss encounter, triggered at the end of Waves 5 and 10. A `WraithPrime` class extending `Enemy` introduces a 3× hitbox, slower approach speed, two boss abilities (Void Trail corruption pools, Gravity Well pull), and a 90-frame extended death dissolve. The wave-complete transition is gated behind `WraithPrime.dead`, replacing the timer-based progression during boss waves. Standard enemy spawns are suspended for the duration. A full Boss UI overlay — wide health bar at top-centre (60% canvas width), deep purple gradient fill, pulsing white glow border, and tracking-heavy nameplate — fades in on spawn and out on death. Defeat triggers `nova_blast` audio, clears all corruption particles, and drops three `IgnisFlare` pickups at the boss's last position. `CorruptionParticle` pools left by Void Trail double the player's light-radius decay rate (via `corruptionDrain` accumulation) while the player remains within 20 px.
+
+**Files changed:** `game.js`, `refinements-changes.md`
+
+**Technical detail:**
+
+- **`CorruptionParticle` class** — static void pool with 480-frame (8s) lifetime. Draws a pulsing radial gradient in deep purple (`#5500aa` core, screen-blended halo). Each particle independently tracks a `pulseOffset` so pools shimmer out of phase, creating visual texture in dense trail sections. `get dead()` is a computed property matching the `Particle` pattern.
+
+- **`WraithPrime` class** — extends `Enemy` but fully overrides `update(hero)` to prevent the base class's instant-death dissolve (ENEMY_DISSOLVE_FRAMES = 10) from firing. The boss uses `WRAITH_DISSOLVE_FRAMES = 90` frames, providing the extended visual of a massive entity collapsing. Constructor stores a `game` reference (passed at spawn) so ability methods can directly push to `game.corruptionParticles`, `game.shockWaves`, and `game.floatingTexts` without passing the reference through every update call. `_drawPips()` is overridden with an empty function — the boss HP bar is the UI element; per-enemy pip dots at 40 HP would be visually illegible at 3× scale. `isDead` is set alongside `this.dead = true` so external code can query the named property.
+
+- **Void Trail** — emits one `CorruptionParticle` at the boss's current position every `WRAITH_TRAIL_INTERVAL = 10` frames. No velocity or spread: pools are deposited along the exact movement path, creating a persistent hazard corridor that forces the player to reroute around the boss's historical position rather than following it.
+
+- **Gravity Well** — fires every `WRAITH_GRAVITY_INTERVAL = 240` frames (4 s). Applies a single lerp step of `WRAITH_GRAVITY_PULL = 0.12` (12% of remaining distance) to both `game.player.x/y` and `game.hero.x/y` toward the boss centre. A `ShockWave` ring at `#8800cc` provides immediate visual confirmation; a light screen shake (intensity 4) adds tactile weight. The lerp magnitude is calibrated so a player at the screen edge is pulled ~70 px toward the boss per firing — noticeable but survivable.
+
+- **Corruption drain mechanic** — `Player` gains `corruptionDrain` (0 by default). Each frame the proximity check in `Game.update()` finds any `CorruptionParticle` within 20 px, `corruptionDrain` increases by `CORRUPTION_DRAIN_RATE = 2.0`, capped at `CORRUPTION_MAX_DRAIN = 70`. Recovery is `CORRUPTION_RECOVERY = 0.5` per frame when clear — a 4:1 build-to-recovery ratio, meaning the player must spend four clear frames for every contaminated frame to return to baseline. This is subtracted from `currentLightRadius` (clamped to a minimum of 20 px), fulfilling the "decay rate doubles" contract: the base recovery rate (0.5/frame) represents a reference decay speed, and active corruption builds at 4× that rate, effectively doubling the net deficit accumulation.
+
+- **Wave gating** — `_tickWave()` checks `this.currentBoss` first. If a boss is active, it returns immediately unless `currentBoss.dead` is true, at which point `_endBossWave()` is called. This completely replaces the `WAVE_DURATION_FRAMES` timer for boss waves, making survival of the encounter the only valid exit condition. `_spawnBoss()` pushes the new `WraithPrime` into `this.enemies` so the standard `enemy.update(this.hero)` loop and draw pipeline apply without special casing.
+
+- **Enemy death loop fix** — the standard dead-enemy cleanup that creates `ShadowPile` objects now checks `instanceof WraithPrime` and skips pile creation for the boss. This prevents a 36-radius ShadowPile appearing at the defeat location (which would reward the wrong mechanic and obscure the IgnisFlare drops from `_endBossWave()`).
+
+- **Boss UI layer** — `drawBossUI()` renders after `ctx.restore()` (post-screen-shake) but before the regular HUD, ensuring the boss bar is never displaced by shake. The `bossUIAlpha` field is ticked in `update()` (not in `draw()`) to keep rendering stateless. The wave progress bar in `drawHUD()` is suppressed via `if (!this.currentBoss)` so the two HP-bar UI elements never compete for the same visual region. Boss is drawn last in the enemies pass (`if (e !== this.currentBoss) e.draw(ctx)` then `this.currentBoss.draw(ctx)`) so its 36-px body always renders above regular enemies.
+
+- **Minimap** — `WraithPrime` instances are skipped in the standard red-dot enemy pass and rendered as a large (5.5 px radius) pulsing purple dot. Corruption pools appear as small semi-transparent purple smudges, providing real-time spatial information about hazard coverage at a glance.
+
+- **Nova and Repel resistances** — `triggerNova()` checks `instanceof WraithPrime` and deals 20 HP chip damage (half the boss's pool) rather than instant vaporisation. `triggerRepel()` similarly deals 2 HP (base) or 5 HP (Flare mode) with a reduced knockback multiplier (0.4×), reflecting the boss's mass. This preserves player agency — Nova remains the single most impactful action against the boss — while preventing a trivial one-shot that would undermine encounter tension.
+
+**Logic Explanation:**
+
+- **Boss Design and Pacing — Scale and Weight (Swink, 2009)**: Swink's *Game Feel* dedicates Chapter 7 to the idea that physical scale communicates threat hierarchy before any mechanical interaction occurs. A player encountering WraithPrime for the first time reads "danger" from its visual mass (3× radius = 9× apparent area) before registering its HP pool or abilities. This is a pre-cognitive safety response: the brain's threat-detection circuits classify size as a proxy for danger (Swink, 2009:126). The deliberately slow approach speed (0.5 vs 0.9 for standard Wraithes) reinforces this reading. Swink (2009:132) distinguishes between "agile enemies" (high speed, low mass feel) and "heavy enemies" (low speed, high mass feel) as two archetypes that produce different psychological responses in the player: agile enemies create reactive urgency; heavy enemies create dread and spatial negotiation. WraithPrime is designed as the latter — the player cannot outrun it indefinitely, but can manage the distance, making every spatial decision feel consequential.
+
+- **Layered Spatial Pressure**: The combination of Void Trail (persistent environmental hazard), Gravity Well (periodic spatial disruption), and direct melee contact creates three concentric threat zones. The player must simultaneously avoid corruption pools (ground-level), maintain distance from the boss body (melee range), and anticipate gravity well firing intervals (tactical macro-movement). This multi-layered pressure is consistent with Schell's (2008:182) principle of "stacking challenges" — each ability in isolation is manageable; in combination they force constant attention across multiple spatial scales.
+
+- **Wave Gating as Narrative Device**: Replacing the countdown timer with `WraithPrime.dead` as the wave-completion condition transforms the encounter from "survive until the clock runs out" into "defeat this entity to advance." This is the difference between an endurance challenge and a decisive confrontation. The store upgrade reward, which normally follows any wave, now reads as post-combat spoils — the player earns it through a specific act of defeat rather than passive survival.
+
+**AI Collaboration Note:** AI (Cursor / Claude) proposed the `game` reference stored in the `WraithPrime` constructor (rather than passing it through `update()`) to keep ability methods self-contained, observing that this follows the same pattern used by `IgnisFlare.update(player, game)` already established in the codebase. AI also suggested the 4:1 drain-to-recovery ratio for `corruptionDrain`, arguing that a symmetric 1:1 ratio would make the mechanic invisible to most players (drain equals recovery, so standing in corruption briefly has no lasting effect), while a dramatically asymmetric ratio (8:1 or higher) would feel punishing and unfair. The 4:1 ratio was proposed as the midpoint that makes the mechanic clearly perceptible without being decisive.
+
+---
+
+**References**
+
+Collins, K. 2008. *Game Sound: An Introduction to the History, Theory, and Practice of Video Game Music and Sound Design*. Cambridge, MA: MIT Press.
+
+Isbister, K. 2016. *How Games Move Us: Emotion by Design*. Cambridge, MA: MIT Press.
+
+Nystrom, R. 2014. *Game Programming Patterns*. [Online]. Available at: https://gameprogrammingpatterns.com [Accessed 26 March 2026].
+
+Rogers, S. 2014. *Level Up! The Guide to Great Video Game Design*. 2nd ed. Chichester: John Wiley & Sons.
+
+Schell, J. 2008. *The Art of Game Design: A Book of Lenses*. Burlington, MA: Morgan Kaufmann.
+
+Swink, S. 2009. *Game Feel: A Game Designer's Guide to Virtual Sensation*. Burlington, MA: Morgan Kaufmann.
+
+---
+
+## Entry 017 — Lumen Dash Mechanic and Dynamic Boss Music
+
+**Date:** 26 March 2026
+
+**Feature summary:** Added the **Lumen Dash** player ability (Shift or Right-Click): a 120 px directional blink executed over 4 frames, with a 3-second cooldown (visualised as a charging cyan arc around the player spark) and a 3-ghost semi-transparent trail that fades over 200 ms. During the dash, the player is fully immune to corruption drain and the corruption proximity check in `Game.update()` is suppressed. A 'DASH READY' FloatingText notification fires on cooldown completion. A 'zip' chirp SFX is triggered on every dash. Extended `AudioManager` to manage two BGM tracks (`bgm` + `bossBgm`): when WraithPrime spawns, a 2-second crossfade ducks the ambient BGM to 0 and rises the boss track to 0.6; on defeat, the crossfade reverses. Pause now applies a master duck factor (0.3) to both tracks simultaneously rather than a single-track `fadeTo`.
+
+**Files changed:** `game.js`, `refinements-changes.md`
+
+**Technical detail:**
+
+- **`DASH_COOLDOWN = 180`** (3 s at 60 fps), **`DASH_DISTANCE = 120`** px, **`DASH_FRAMES = 4`**, **`DASH_GHOST_LIFE = 12`** frames (~200 ms). The per-frame velocity is `DASH_DISTANCE / DASH_FRAMES = 30 px/frame`.
+
+- **`Player.triggerDash(game)`** — computes a normalised direction vector from the current player position to `game.mouseX/Y`, multiplies by `30 px/frame`, sets `dashActive = true` and `dashFrames = 4`, seeds the first ghost copy, and resets `dashTimer = 0`. Returns immediately if `dashTimer < DASH_COOLDOWN` (cooldown guard) or if the direction vector length is < 1 px (cursor on top of player — undefined direction).
+
+- **Dash movement phase** — inside `Player.update()`, when `dashActive` is true, the standard `this.x = mouseX` assignment is skipped. Instead, the current position is pushed to `dashGhosts` (with `life = DASH_GHOST_LIFE`) before `dashVx/Vy` is applied, so each frame produces one ghost at the intermediate positions along the trajectory. Viewport clamping still runs, preventing dash clipping through the canvas edge. After `dashFrames` reaches 0, `dashActive = false` and normal mouse-following resumes.
+
+- **Ghost trail rendering** — `Player.draw()` iterates `dashGhosts` before calling `drawSprite()`. Each ghost renders as a screen-blended radial gradient halo (matching the player's glow style) plus a solid cyan disc. Both opacity and radius scale linearly with `ghost.life / DASH_GHOST_LIFE`, so the freshest ghost is brightest and largest. The three copies (seeded at frames 0, 1, 2 of the 4-frame dash) are staggered in life, creating a clear directional smear.
+
+- **Dash cooldown arc** — drawn as Layer 4 in `drawSprite()` after the orbital flare arcs. The dim background ring is always visible; the fill arc charges clockwise from the 12 o'clock position (start angle = `−π/2`), reaching full circle at `dashTimer === DASH_COOLDOWN`. When ready, stroke width increases to 2 px and the shadow colour brightens to white for visual distinctiveness.
+
+- **`AudioManager` refactor** — the class now holds two `HTMLAudioElement` instances (`this.bgm`, `this.bossBgm`) and three volume scalars: `_bgmVol` (target for ambient track, default 0.5), `_bossVol` (target for boss track, default 0), and `_duck` (master factor, default 1.0). A single `_apply()` method writes `vol × _duck` to each element's `.volume` property. Two `setInterval` handles (`_bgmFade`, `_bossFade`) drive independent per-track fades via `_startFade(track, target, ms)` / `_cancelFade(track)`.
+
+- **`startBossMusic()` / `endBossMusic()`** — each calls `_startFade()` on both tracks simultaneously for a true crossfade. `startBossMusic()` fades bgm → 0 and bossBgm → 0.6 over 2000 ms; `endBossMusic()` reverses this. The boss track is started (at volume 0) inside `play()` so it is already decoded and buffered by the time the encounter begins — no latency spike at the crossfade point. `resetBossMusic()` provides an instant-cut escape for restart/menu transitions, cancelling any in-progress fade and snapping `_bossVol = 0`.
+
+- **Pause duck** — `_togglePause()` now calls `audio.duck()` (sets `_duck = 0.3`, calls `_apply()`) instead of `fadeTo(0.15, 500)`. The numeric outcome is identical for the ambient track: `0.5 × 0.3 = 0.15`. The critical improvement is that `_duck` is applied multiplicatively to *both* tracks, so a pause mid-boss encounter correctly attenuates the boss music (e.g., `0.6 × 0.3 = 0.18`) rather than leaving it at full volume. `unduck()` restores `_duck = 1.0`.
+
+- **Game-over silence** — `update()` now calls `audio.fadeAllTo(0, 3000)` on the first gameover frame, replacing the single-track `fadeTo`. This prevents the boss track from continuing to play audibly while the cinematic overlay fades in.
+
+- **`_sfxDash(ctx)`** — a 120 ms sine chirp sweeping 1400 Hz → 2800 Hz → 900 Hz with an exponential gain decay. A high-pass filter at 800 Hz (Q = 2.0) removes the low-mid body, leaving only the airy upper harmonics. The frequency arc (rise then fall) mimics the Doppler shift of rapid lateral movement and is perceptually distinct from all existing SFX profiles. Master gain: 0.38 (below the 0.42 standard to avoid forward-masking gameplay sounds immediately after a dash).
+
+- **HUD** — DASH row added to the left panel charge bar cluster between NOVA and FLARE. Panel base height expanded from 102 px to 122 px. FLARE and STREAK rows shift down 20 px accordingly. The How-to-Play overlay gains a `SHIFT — Lumen Dash — Blink (3s)` entry; panel height expanded from 160 px to 186 px to accommodate the fifth row.
+
+**Logic Explanation:**
+
+- **Mobility as a Survival Mechanic**: A dash ability changes a survival game's fundamental vocabulary from *position maintenance* to *position negotiation*. Without a dash, the optimal strategy is conservative: keep the light cursor at maximum distance from enemies, making small corrections. With a dash, the player gains a binary escape valve — they can allow a threatening situation to develop (staying in range to cleanse piles or kite enemies) knowing they can exit instantaneously. This raises the skill ceiling by rewarding risk-tolerance: a player who stays near corruption pools to cleanse them, then dashes clear before the drain accumulates, scores faster and gains more heal orbs than one who avoids the area entirely. This mirrors the "risk-reward tempo" Swink (2009:198) describes as the foundation of arcade-feel in dodge-centric designs. The 4-frame visual duration (rather than an instant teleport) is a deliberate feel choice: Swink (2009:52) argues that "the perception of speed requires contrast — a visible displacement over time." An instant teleport would feel like a glitch; four frames of motion with ghost copies make the distance covered legible and satisfying.
+
+- **Audio Layering for Narrative Tension (Ekman, 2008)**: Ekman (2008:297) identifies *musical anticipation* as the primary mechanism by which game music communicates threat state: "the shift from ambient to tense music does not describe the threat, it *is* the threat — the player's emotional register changes before any mechanical damage occurs." The crossfade from ambient BGM to boss music is designed around this principle. By beginning the fade when WraithPrime *spawns* (not when it first deals damage), the musical shift functions as a narrative announcement — the world acknowledges the presence of an elite threat. The 2-second fade duration is long enough to feel deliberate rather than abrupt, but short enough that the boss music reaches full volume before the boss has covered the distance from the spawn edge to the arena centre (at speed 0.5 px/frame, 120 frames = 60 px, well within the approach time). Ekman (2008:301) further argues that the *removal* of the threat layer is equally important: "silence after tension is itself a signal." The `endBossMusic()` reverse-fade, played on boss defeat, functions as a musical exhale — the world returning to its ambient state, signalling safety and rewarding the player emotionally before any UI confirms the outcome.
+
+- **The Duck Factor vs. Per-Track Fade**: The previous pause implementation called `fadeTo(0.15, 500)` on the single BGM track. With two tracks, a naive extension would call `fadeTo` on each independently, but this introduces a state problem: the fade for each track would start from its *current* volume, not its *target* volume. If a fade is already in progress (e.g., the boss crossfade is halfway through), calling a second fade would start from mid-transition and produce an incorrect endpoint. The master duck factor sidesteps this entirely: `_duck = 0.3` is applied multiplicatively in `_apply()` to whatever `_bgmVol × _bossVol` currently are, regardless of whether a fade is in progress. The fade interval continues updating `_bgmVol/_bossVol` silently while ducked, so when `unduck()` restores `_duck = 1.0`, the volumes snap to wherever the fade has reached — a behaviorally correct and predictably deterministic result.
+
+**AI Collaboration Note:** AI (Cursor / Claude) proposed the ghost trail using pre-move position captures (pushing position *before* applying `dashVx/Vy`) rather than post-move, noting that this ensures ghosts trail behind the player in movement direction rather than overlapping with the current position. AI also recommended the high-pass filter on `_sfxDash` to prevent low-frequency content from masking the background drone, arguing that a full-spectrum chirp would "compete with the ambient bass register" — matching Farnell's (2010:ch.4) guidance on SFX spectral separation in mixed audio environments.
+
+---
+
+**References**
+
+Collins, K. 2008. *Game Sound: An Introduction to the History, Theory, and Practice of Video Game Music and Sound Design*. Cambridge, MA: MIT Press.
+
+Ekman, I. 2008. 'Psychologically motivated techniques for emotional sound in computer games', in *Proceedings of the Audio Mostly Conference*. Piteå: Interactive Institute.
+
+Farnell, A. 2010. *Designing Sound*. Cambridge, MA: MIT Press.
+
+Nystrom, R. 2014. *Game Programming Patterns*. [Online]. Available at: https://gameprogrammingpatterns.com [Accessed 26 March 2026].
+
+Swink, S. 2009. *Game Feel: A Game Designer's Guide to Virtual Sensation*. Burlington, MA: Morgan Kaufmann.

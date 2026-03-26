@@ -66,6 +66,33 @@ const MINIMAP_MARGIN = 20;    // px inset from canvas corner
 
 const MENU_CIRCLE_RADIUS = 220;  // px — safe-zone barrier ring radius in MENU state
 
+// ─── Wraith Prime Boss Constants ──────────────────────────────────────────────
+
+// ─── Lumen Dash Constants ─────────────────────────────────────────────────────
+
+const DASH_COOLDOWN   = 180;   // 3s at 60fps
+const DASH_DISTANCE   = 120;   // px total travel per dash
+const DASH_FRAMES     = 4;     // animation frames for the dash
+const DASH_GHOST_LIFE = 12;    // frames a ghost copy persists (~200ms)
+
+// ─── Wraith Prime Boss Constants ──────────────────────────────────────────────
+
+const WRAITH_HP               = 40;    // boss health pool
+const WRAITH_RADIUS_MULT      = 3;     // 3× hitbox relative to base enemy radius (36px)
+const WRAITH_SPEED            = 0.50;  // slow, weighty advance
+const WRAITH_GRAVITY_INTERVAL = 240;   // 4s at 60fps between Gravity Well pulses
+const WRAITH_GRAVITY_PULL     = 0.12;  // lerp fraction applied each well-fire
+const WRAITH_TRAIL_INTERVAL   = 10;    // frames between Void Trail deposits
+const WRAITH_DISSOLVE_FRAMES  = 90;    // 1.5s boss death dissolve
+const BOSS_FADE_FRAMES        = 60;    // UI fade-in / fade-out duration in frames
+const BOSS_WAVES              = [5, 10]; // which waves trigger a boss encounter
+
+const CORRUPTION_LIFETIME     = 480;   // 8s — how long a corruption pool persists
+const CORRUPTION_DRAIN_ZONE   = 20;    // px — player proximity that activates drain
+const CORRUPTION_DRAIN_RATE   = 2.0;   // px of lightRadius penalty added per frame near corruption
+const CORRUPTION_RECOVERY     = 0.5;   // px recovered per frame when clear
+const CORRUPTION_MAX_DRAIN    = 70;    // px ceiling on corruption penalty
+
 // ─── Upgrade Definitions ──────────────────────────────────────────────────────
 
 const UPGRADE_DEFS = [
@@ -260,25 +287,58 @@ class Player {
         this.comboTimer   = 0;
         this.streakActive = false;
         this.streakBonus  = 0;             // computed each frame from streak state
-        this.flareActive  = false;         // true while Ignis Flare buff is running
-        this.flareTimer   = 0;             // counts down from FLARE_DURATION to 0
+        this.flareActive     = false;      // true while Ignis Flare buff is running
+        this.flareTimer      = 0;         // counts down from FLARE_DURATION to 0
+        this.corruptionDrain = 0;         // accumulated light-radius penalty from boss corruption
+
+        // ── Lumen Dash ─────────────────────────────────────────────────────────
+        this.dashTimer  = DASH_COOLDOWN;  // starts ready
+        this.dashActive = false;          // true during the 4-frame movement phase
+        this.dashFrames = 0;              // countdown within the dash
+        this.dashVx     = 0;             // per-frame velocity during dash
+        this.dashVy     = 0;
+        this.dashGhosts = [];             // [{x, y, life}] fading ghost copies
         // this.img is intentionally absent — resolved via Player.prototype.img after asset load
     }
 
     update(mouseX, mouseY, shadowPiles, game) {
-        // Record previous position before moving (persistence-of-vision trail)
-        this.trail.push({ x: this.x, y: this.y });
-        if (this.trail.length > TRAIL_LENGTH) this.trail.shift();
+        // ── Ghost copy aging — tick every frame regardless of dash state ──────
+        for (let i = this.dashGhosts.length - 1; i >= 0; i--) {
+            this.dashGhosts[i].life--;
+            if (this.dashGhosts[i].life <= 0) this.dashGhosts.splice(i, 1);
+        }
 
-        this.x = mouseX;
-        this.y = mouseY;
-
-        // Viewport clamp — player slides along the canvas boundary rather than
-        // disappearing off-screen; radius used as the soft wall thickness.
-        this.x = Math.max(this.radius, Math.min(game.canvas.width  - this.radius, this.x));
-        this.y = Math.max(this.radius, Math.min(game.canvas.height - this.radius, this.y));
+        // ── Position update: dash overrides mouse follow ──────────────────────
+        if (this.dashActive) {
+            // Capture pre-move position as next ghost copy
+            this.dashGhosts.push({ x: this.x, y: this.y, life: DASH_GHOST_LIFE });
+            this.dashFrames--;
+            this.x += this.dashVx;
+            this.y += this.dashVy;
+            this.x = Math.max(this.radius, Math.min(game.canvas.width  - this.radius, this.x));
+            this.y = Math.max(this.radius, Math.min(game.canvas.height - this.radius, this.y));
+            if (this.dashFrames <= 0) this.dashActive = false;
+        } else {
+            // Record previous position for the persistence-of-vision trail
+            this.trail.push({ x: this.x, y: this.y });
+            if (this.trail.length > TRAIL_LENGTH) this.trail.shift();
+            this.x = mouseX;
+            this.y = mouseY;
+            this.x = Math.max(this.radius, Math.min(game.canvas.width  - this.radius, this.x));
+            this.y = Math.max(this.radius, Math.min(game.canvas.height - this.radius, this.y));
+        }
 
         this.orbitAngle += 0.035;
+
+        // ── Dash cooldown charge ──────────────────────────────────────────────
+        if (this.dashTimer < DASH_COOLDOWN) {
+            this.dashTimer++;
+            if (this.dashTimer === DASH_COOLDOWN) {
+                game.floatingTexts.push(new FloatingText(
+                    this.x, this.y - 40, 'DASH  READY', '#00ffff', 11
+                ));
+            }
+        }
 
         // Combo window countdown — resets count and streak when expired
         if (this.comboTimer > 0) {
@@ -297,10 +357,19 @@ class Player {
 
         // Streak bonus: +50% light radius when combo streak is active
         // Flare bonus: Luminous Overload — doubles effective light radius
+        // Corruption drain: recovered only while NOT dashing (dash grants immunity).
+        // Accumulation via proximity check in Game.update() is also suppressed during dash.
+        if (!this.dashActive && this.corruptionDrain > 0) {
+            this.corruptionDrain = Math.max(0, this.corruptionDrain - CORRUPTION_RECOVERY);
+        }
         this.streakBonus = this.streakActive ? this.lightRadius * COMBO_STREAK_BONUS : 0;
         const flareBonus = this.flareActive   ? this.lightRadius                      : 0;
-        this.currentLightRadius =
-            this.lightRadius + this.streakBonus + flareBonus + Math.sin(game.time * PULSE_SPEED) * PULSE_AMPLITUDE;
+        this.currentLightRadius = Math.max(
+            20,
+            this.lightRadius + this.streakBonus + flareBonus
+            - this.corruptionDrain
+            + Math.sin(game.time * PULSE_SPEED) * PULSE_AMPLITUDE
+        );
 
         // Repel charge & auto-fire
         if (this.repelTimer < REPEL_COOLDOWN) this.repelTimer++;
@@ -391,21 +460,32 @@ class Player {
             if (enemy.dying) continue;
             const dist = Math.hypot(this.x - enemy.x, this.y - enemy.y);
             if (dist < REPEL_RADIUS && dist > 0) {
+                const isBoss = enemy instanceof WraithPrime;
                 if (this.flareActive) {
-                    // Holy Repel — Vaporize: instant destroy with gold burst
+                    // Holy Repel — boss: heavy damage; standard enemies: vaporize
                     for (let j = 0; j < 8; j++) {
                         const p = new Particle(enemy.x, enemy.y, '#ffcc00');
                         p.vx = (Math.random() - 0.5) * 5;
                         p.vy = (Math.random() - 0.5) * 5;
                         game.particles.push(p);
                     }
-                    enemy.dying = true;
+                    if (isBoss) {
+                        enemy.hp = Math.max(0, enemy.hp - 5);
+                        if (enemy.hp <= 0) enemy.dying = true;
+                    } else {
+                        enemy.dying = true;
+                    }
                 } else {
                     const angle  = Math.atan2(enemy.y - this.y, enemy.x - this.x);
-                    const factor = 1 - dist / REPEL_RADIUS;   // stronger when closer
+                    const factor = 1 - dist / REPEL_RADIUS;
                     enemy.knockbackVx = Math.cos(angle) * 15 * factor;
                     enemy.knockbackVy = Math.sin(angle) * 15 * factor;
                     enemy.stunFrames  = REPEL_STUN_FRAMES;
+                    // Repel also chips boss HP
+                    if (isBoss) {
+                        enemy.hp = Math.max(0, enemy.hp - 2);
+                        if (enemy.hp <= 0) enemy.dying = true;
+                    }
                 }
             }
         }
@@ -433,18 +513,23 @@ class Player {
             game.particles.push(p);
         }
 
-        // Vaporise all non-dissolving enemies within NOVA_RADIUS
+        // Vaporise all non-dissolving enemies within NOVA_RADIUS.
+        // WraithPrime resists instant kill — Nova deals 20 HP damage instead.
         for (const enemy of game.enemies) {
             if (enemy.dying) continue;
             if (Math.hypot(this.x - enemy.x, this.y - enemy.y) < NOVA_RADIUS) {
-                // Micro burst at enemy position
                 for (let j = 0; j < 8; j++) {
                     const p = new Particle(enemy.x, enemy.y, '#ffaa00');
                     p.vx = (Math.random() - 0.5) * 5;
                     p.vy = (Math.random() - 0.5) * 5;
                     game.particles.push(p);
                 }
-                enemy.dying = true;
+                if (enemy instanceof WraithPrime) {
+                    enemy.hp = Math.max(0, enemy.hp - 20);
+                    if (enemy.hp <= 0) enemy.dying = true;
+                } else {
+                    enemy.dying = true;
+                }
             }
         }
 
@@ -466,6 +551,31 @@ class Player {
         }
 
         game.floatingTexts.push(new FloatingText(this.x, this.y - 65, 'LUMEN NOVA!', '#ffffff', 18));
+    }
+
+    // Lumen Dash — blink 120 px toward the cursor in 4 frames.
+    // Invulnerable to corruption drain during the dash.
+    // Cooldown: 3s (DASH_COOLDOWN frames), visualised as a charging arc.
+    triggerDash(game) {
+        if (this.dashTimer < DASH_COOLDOWN) return;
+
+        const dx  = game.mouseX - this.x;
+        const dy  = game.mouseY - this.y;
+        const len = Math.hypot(dx, dy);
+        if (len < 1) return;   // cursor on top of player — no direction
+
+        this.dashTimer  = 0;
+        const nx        = dx / len;
+        const ny        = dy / len;
+        this.dashVx     = nx * (DASH_DISTANCE / DASH_FRAMES);
+        this.dashVy     = ny * (DASH_DISTANCE / DASH_FRAMES);
+        this.dashFrames = DASH_FRAMES;
+        this.dashActive = true;
+
+        // Seed ghost at origin before the movement begins
+        this.dashGhosts.push({ x: this.x, y: this.y, life: DASH_GHOST_LIFE });
+
+        game.audio.playSoundEffect('dash_zip');
     }
 
     // Draws fading cyan circles for the last TRAIL_LENGTH positions.
@@ -544,9 +654,76 @@ class Player {
         ctx.stroke();
 
         ctx.restore();
+
+        // ── Layer 4: Dash cooldown arc — charges clockwise from 12 o'clock ───
+        const dashFrac  = Math.min(1, this.dashTimer / DASH_COOLDOWN);
+        const dashReady = dashFrac >= 1;
+        const arcR      = this.radius * 3.2;
+
+        ctx.save();
+        ctx.translate(this.x, this.y);
+
+        // Dim track ring
+        ctx.beginPath();
+        ctx.arc(0, 0, arcR, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(0, 60, 70, 0.35)';
+        ctx.lineWidth   = 1.5;
+        ctx.stroke();
+
+        // Fill arc
+        if (dashFrac > 0) {
+            const start = -Math.PI / 2;
+            const end   = start + Math.PI * 2 * dashFrac;
+            ctx.beginPath();
+            ctx.arc(0, 0, arcR, start, end);
+            if (dashReady) {
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth   = 2;
+                ctx.shadowColor = '#00ffff';
+                ctx.shadowBlur  = 14;
+            } else {
+                ctx.strokeStyle = '#00cccc';
+                ctx.lineWidth   = 1.5;
+                ctx.shadowColor = '#00ffff';
+                ctx.shadowBlur  = 5;
+            }
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+        }
+
+        ctx.restore();
     }
 
-    draw(ctx) { this.drawSprite(ctx); }
+    draw(ctx) {
+        // ── Ghost trail — semi-transparent copies fading along the dash path ──
+        for (const ghost of this.dashGhosts) {
+            const t = ghost.life / DASH_GHOST_LIFE;  // 1 (new) → 0 (faded)
+            ctx.save();
+            ctx.globalAlpha = t * 0.48;
+            // Outer soft halo
+            ctx.globalCompositeOperation = 'screen';
+            const glowR = this.radius * 4;
+            const glow  = ctx.createRadialGradient(ghost.x, ghost.y, 0, ghost.x, ghost.y, glowR);
+            glow.addColorStop(0,   'rgba(0, 220, 255, 0.55)');
+            glow.addColorStop(0.4, 'rgba(0, 100, 200, 0.15)');
+            glow.addColorStop(1,   'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = glow;
+            ctx.beginPath();
+            ctx.arc(ghost.x, ghost.y, glowR, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalCompositeOperation = 'source-over';
+            // Core disc
+            ctx.beginPath();
+            ctx.arc(ghost.x, ghost.y, this.radius * (0.5 + t * 0.7), 0, Math.PI * 2);
+            ctx.fillStyle   = '#00ffff';
+            ctx.shadowColor = '#00ffff';
+            ctx.shadowBlur  = 18 * t;
+            ctx.fill();
+            ctx.shadowBlur  = 0;
+            ctx.restore();
+        }
+        this.drawSprite(ctx);
+    }
 
     // Fallback body only — no glow, no flares (those live in drawSprite now)
     _drawProcedural(ctx) {
@@ -1126,91 +1303,407 @@ class IgnisFlare {
     }
 }
 
-// ─── AudioManager ─────────────────────────────────────────────────────────────
-// Wraps HTMLAudioElement for looping background music with volume control,
-// mute toggle, and smooth fade transitions driven by setInterval.
+// ─── CorruptionParticle ───────────────────────────────────────────────────────
+// Static void pool left by WraithPrime's Void Trail ability. Persists for
+// CORRUPTION_LIFETIME frames and doubles the Player's light-radius decay rate
+// while they remain within CORRUPTION_DRAIN_ZONE pixels.
+
+class CorruptionParticle {
+    constructor(x, y) {
+        this.x    = x;
+        this.y    = y;
+        this.age  = 0;
+        this.life = 1.0;                          // 1 → 0 linear over lifetime
+        this.decay = 1 / CORRUPTION_LIFETIME;
+        this.pulseOffset = Math.random() * Math.PI * 2;
+    }
+
+    update() {
+        this.age++;
+        this.life -= this.decay;
+    }
+
+    get dead() { return this.life <= 0; }
+
+    draw(ctx) {
+        const pulse = 0.55 + 0.45 * Math.abs(Math.sin(this.age * 0.07 + this.pulseOffset));
+        const r     = 5 + pulse * 3;
+        const a     = this.life * pulse * 0.85;
+
+        ctx.save();
+        ctx.globalAlpha = a;
+
+        // Outer void halo
+        const halo = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, r * 3);
+        halo.addColorStop(0,   'rgba(90,  0, 180, 0.55)');
+        halo.addColorStop(0.5, 'rgba(40,  0,  80, 0.20)');
+        halo.addColorStop(1,   'rgba(0,   0,   0, 0)');
+        ctx.fillStyle = halo;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, r * 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Core pool
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
+        ctx.fillStyle   = '#5500aa';
+        ctx.shadowColor = '#cc44ff';
+        ctx.shadowBlur  = 12;
+        ctx.fill();
+        ctx.shadowBlur  = 0;
+
+        ctx.restore();
+    }
+}
+
+// ─── WraithPrime ──────────────────────────────────────────────────────────────
+// Elite boss entity appearing at the end of Waves 5 and 10.
+// 3× hitbox, Void Trail corruption, and a periodic Gravity Well that pulls
+// both the Player cursor and the Hero toward the boss centre.
 //
-// play() is intentionally separated from construction: browsers enforce the
-// Web Audio Autoplay Policy (Chrome 66+, Firefox 66+) which blocks audio.play()
-// unless triggered inside a direct user-gesture handler.  Initialising the
-// Audio object in the constructor is safe; calling play() only from _startGame()
-// (which runs inside a 'keydown' handler) guarantees the gesture requirement is
-// satisfied (Collins, 2008:189; MDN Web Docs, 2024).
+// Entry 016 — Boss Design and Pacing
+// WraithPrime embodies Swink's (2009:126) principle of 'Scale and Weight':
+// a physically massive presence communicates threat hierarchy through visual
+// mass before any mechanical engagement begins. Its slow advance speed (0.5
+// vs 0.9 for standard Wraithes) reinforces gravitational authority — the
+// lumbering, unstoppable quality that distinguishes an elite encounter from
+// a faster but weaker attacker. The Gravity Well ability collapses the
+// player's spatial freedom every 4 seconds, demanding active repositioning
+// and preventing passive kiting strategies (Swink, 2009:132). Void Trail
+// corruption pools shrink the effective light radius, creating layered
+// spatial pressure: the player must avoid both the boss and its persistent
+// environmental residue, raising cognitive load without increasing raw damage.
+// Pacing is controlled by gating the wave-complete transition behind
+// WraithPrime.isDead, ensuring the encounter cannot be bypassed by timer.
+//
+// References:
+//   Swink, S. (2009) Game Feel. Morgan Kaufmann, Burlington, MA.
 
-class AudioManager {
-    constructor(src) {
-        this.audio         = new Audio(src);
-        this.audio.loop    = true;
-        this.muted         = false;
-        this._targetVol    = 0.5;
-        this._fadeInterval = null;
-        this._ctx          = null;   // AudioContext created lazily on first gesture
+class WraithPrime extends Enemy {
+    constructor(x, y, game) {
+        super(x, y, WRAITH_SPEED);
+        this.game         = game;
+        this.radius       = 12 * WRAITH_RADIUS_MULT;   // 36px
+        this.hp           = WRAITH_HP;
+        this.maxHp        = WRAITH_HP;
+        this.isDead       = false;
+        this.trailTimer   = 0;
+        this.gravityTimer = 0;
+        this.spawnAge     = 0;
+        this.orbitAngle   = 0;
     }
 
-    // Start playback.  Must be called from within a user-gesture handler.
-    // Also ensures the AudioContext is created here (gesture scope), satisfying
-    // Safari's strict policy that ctx.resume() must happen in a synchronous handler.
-    play() {
-        this._getCtx();
-        this.audio.play().catch(() => {});
-    }
+    // Overrides Enemy.update fully to control the longer dissolve and inject
+    // boss-specific abilities (game ref needed for corruption / shockwave spawn).
+    update(hero) {
+        this.age++;
+        this.spawnAge++;
 
-    // Instantly set volume and cancel any running fade.
-    setVolume(v) {
-        this._clearFade();
-        this._targetVol = v;
-        if (!this.muted) this.audio.volume = v;
-    }
+        if (this.dying) {
+            this.dyingFrames++;
+            this.alpha = Math.max(0, 1 - this.dyingFrames / WRAITH_DISSOLVE_FRAMES);
+            if (this.dyingFrames >= WRAITH_DISSOLVE_FRAMES) {
+                this.dead   = true;
+                this.isDead = true;
+            }
+            return;
+        }
 
-    // Smoothly ramp volume from the current level to targetVol over durationMs.
-    // Uses setInterval (independent of RAF) so the fade continues even when the
-    // game loop pauses or slows.  Previous fades are cancelled before starting.
-    fadeTo(targetVol, durationMs) {
-        this._clearFade();
-        const steps    = 60;
-        const stepMs   = Math.max(16, durationMs / steps);
-        const startVol = this.audio.volume;
-        const delta    = (targetVol - startVol) / steps;
-        let   step     = 0;
-        this._fadeInterval = setInterval(() => {
-            step++;
-            const v = Math.max(0, Math.min(1, startVol + delta * step));
-            this._targetVol = v;
-            if (!this.muted) this.audio.volume = v;
-            if (step >= steps) this._clearFade();
-        }, stepMs);
-    }
+        // Knockback / stun (inherited mechanic, reduced effectiveness at 3× mass)
+        if (this.stunFrames > 0) {
+            this.stunFrames--;
+            this.x += this.knockbackVx * 0.4;   // boss resists knock
+            this.y += this.knockbackVy * 0.4;
+            this.knockbackVx *= 0.85;
+            this.knockbackVy *= 0.85;
+        } else {
+            // Advance toward Hero
+            const angle = Math.atan2(hero.y - this.y, hero.x - this.x);
+            this.x += Math.cos(angle) * this.speed;
+            this.y += Math.sin(angle) * this.speed;
+        }
 
-    // Toggle mute.  _targetVol is preserved so unmuting restores the correct level
-    // even mid-fade (e.g. unpausing after a duck, or un-muting during a game-over
-    // fade — the fade interval continues updating _targetVol silently).
-    toggleMute() {
-        this.muted        = !this.muted;
-        this.audio.volume = this.muted ? 0 : this._targetVol;
-        return this.muted;
-    }
+        this.orbitAngle += 0.018;
 
-    // Pause and reset the track (used when returning to the main menu so the
-    // next play() always starts from the beginning at full volume).
-    stop() {
-        this._clearFade();
-        this.audio.pause();
-        this.audio.currentTime = 0;
-        this._targetVol        = 0.5;
-        if (!this.muted) this.audio.volume = 0.5;
-    }
+        // Hero contact damage — 2× normal (scale + weight = force)
+        if (Math.hypot(this.x - hero.x, this.y - hero.y) < this.radius + hero.radius) {
+            hero.hp -= 0.16 * (1 - hero.damageResist);
+        }
 
-    _clearFade() {
-        if (this._fadeInterval) {
-            clearInterval(this._fadeInterval);
-            this._fadeInterval = null;
+        // ── Void Trail ───────────────────────────────────────────────────────
+        this.trailTimer++;
+        if (this.trailTimer >= WRAITH_TRAIL_INTERVAL) {
+            this.trailTimer = 0;
+            this.game.corruptionParticles.push(new CorruptionParticle(this.x, this.y));
+        }
+
+        // ── Gravity Well ─────────────────────────────────────────────────────
+        this.gravityTimer++;
+        if (this.gravityTimer >= WRAITH_GRAVITY_INTERVAL) {
+            this.gravityTimer = 0;
+            this._triggerGravityWell();
         }
     }
 
+    _triggerGravityWell() {
+        const g    = this.game;
+        const pull = WRAITH_GRAVITY_PULL;
+
+        // Lerp Player cursor toward boss
+        g.player.x += (this.x - g.player.x) * pull;
+        g.player.y += (this.y - g.player.y) * pull;
+
+        // Lerp Hero toward boss
+        g.hero.x   += (this.x - g.hero.x) * pull;
+        g.hero.y   += (this.y - g.hero.y) * pull;
+
+        // Tactile feedback
+        g.triggerShake(4, 14);
+        g.shockWaves.push(new ShockWave(this.x, this.y, this.radius * 3.5, '#8800cc'));
+        g.floatingTexts.push(new FloatingText(
+            this.x, this.y - this.radius - 18, 'GRAVITY WELL', '#cc44ff', 13
+        ));
+    }
+
+    draw(ctx) {
+        const f     = Math.sin(this.age * 0.08 + this.flickerPhase);
+        const scale = this.dying ? this.alpha : 1;
+        const r     = this.radius;
+
+        ctx.save();
+        ctx.globalAlpha = this.alpha;
+        ctx.translate(this.x, this.y);
+        ctx.scale(scale, scale);
+
+        // ── Outer void aura (screen-blend) ───────────────────────────────────
+        ctx.globalCompositeOperation = 'screen';
+        const aura = ctx.createRadialGradient(0, 0, r * 0.4, 0, 0, r * 2.8);
+        aura.addColorStop(0,    'rgba(100,  0, 220, 0.4)');
+        aura.addColorStop(0.5,  'rgba(50,   0, 110, 0.15)');
+        aura.addColorStop(1,    'rgba(0,    0,   0, 0)');
+        ctx.fillStyle = aura;
+        ctx.beginPath();
+        ctx.arc(0, 0, r * 2.8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalCompositeOperation = 'source-over';
+
+        // ── Wispy tendrils (12) ───────────────────────────────────────────────
+        for (let i = 0; i < 12; i++) {
+            const a   = (i / 12) * Math.PI * 2 + f * 0.18;
+            const tr  = r * (0.78 + f * 0.14);
+            ctx.beginPath();
+            ctx.arc(
+                Math.cos(a) * tr * 0.60,
+                Math.sin(a) * tr * 0.60,
+                7 + Math.abs(f) * 3.5,
+                0, Math.PI * 2
+            );
+            ctx.fillStyle = 'rgba(55, 0, 100, 0.78)';
+            ctx.fill();
+        }
+
+        // ── Main void body ────────────────────────────────────────────────────
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.fillStyle   = '#0a0016';
+        ctx.fill();
+        ctx.strokeStyle = `rgba(160, 0, 240, 0.90)`;
+        ctx.lineWidth   = 3.5;
+        ctx.shadowColor = '#8800cc';
+        ctx.shadowBlur  = 20;
+        ctx.stroke();
+        ctx.shadowBlur  = 0;
+
+        // ── Pulsing void core ─────────────────────────────────────────────────
+        const coreR = r * (0.35 + Math.abs(f) * 0.12);
+        ctx.beginPath();
+        ctx.arc(0, 0, coreR, 0, Math.PI * 2);
+        ctx.fillStyle   = '#7700dd';
+        ctx.shadowColor = '#dd66ff';
+        ctx.shadowBlur  = 28;
+        ctx.fill();
+        ctx.shadowBlur  = 0;
+
+        // ── Rotating orbital ring ─────────────────────────────────────────────
+        ctx.rotate(this.orbitAngle);
+        ctx.beginPath();
+        ctx.arc(0, 0, r * 1.25, 0.5, Math.PI * 1.5);
+        ctx.strokeStyle = `rgba(180, 60, 255, ${0.55 + Math.abs(f) * 0.3})`;
+        ctx.lineWidth   = 3;
+        ctx.shadowColor = '#cc44ff';
+        ctx.shadowBlur  = 18;
+        ctx.stroke();
+
+        // Counter-ring
+        ctx.rotate(Math.PI);
+        ctx.beginPath();
+        ctx.arc(0, 0, r * 1.42, 0.8, Math.PI * 1.2);
+        ctx.strokeStyle = `rgba(110, 0, 200, 0.35)`;
+        ctx.lineWidth   = 1.5;
+        ctx.shadowBlur  = 0;
+        ctx.stroke();
+
+        ctx.restore();
+
+        // Stun ring drawn outside transform so it is screen-aligned
+        this._drawStunRing(ctx);
+    }
+
+    // Boss is large enough that HP pips are meaningless — suppressed.
+    _drawPips() {}
+}
+
+// ─── AudioManager ─────────────────────────────────────────────────────────────
+// Manages two looping BGM tracks (normal ambience + boss encounter) and a Web
+// Audio API procedural SFX engine.  A master duck factor (1.0 / 0.3) lets the
+// pause system attenuate both tracks simultaneously without disturbing their
+// individual target volumes, enabling correct restore after unpausing mid-boss.
+//
+// play() must be called from a user-gesture handler (Web Audio Autoplay Policy,
+// Chrome 66+, Firefox 66+, Safari 11+).  AudioContext is created lazily inside
+// play() so the first touch always occurs within that gesture scope.
+
+class AudioManager {
+    constructor(bgmSrc, bossBgmSrc) {
+        this.bgm          = new Audio(bgmSrc);
+        this.bgm.loop     = true;
+        this.bossBgm      = new Audio(bossBgmSrc);
+        this.bossBgm.loop = true;
+
+        this.muted      = false;
+        this._bgmVol    = 0.5;   // target vol for normal BGM (unducked)
+        this._bossVol   = 0;     // target vol for boss BGM (starts silent)
+        this._duck      = 1.0;   // master duck multiplier (0.3 when paused)
+
+        this._bgmFade   = null;  // setInterval handle for BGM fade
+        this._bossFade  = null;  // setInterval handle for boss BGM fade
+        this._ctx       = null;  // Web Audio context — created lazily
+    }
+
+    // ── BGM control ──────────────────────────────────────────────────────────
+
+    // Start both tracks. bossBgm opens at volume 0 (ready for startBossMusic).
+    play() {
+        this._getCtx();
+        this.bgm.play().catch(() => {});
+        this.bossBgm.volume = 0;
+        this.bossBgm.play().catch(() => {});
+    }
+
+    // Instantly set the normal BGM volume.
+    setVolume(v) {
+        this._cancelFade('bgm');
+        this._bgmVol = v;
+        this._apply();
+    }
+
+    // Smooth fade for the normal BGM track (used by pause duck, game-over, etc.).
+    fadeTo(targetVol, durationMs) {
+        this._startFade('bgm', targetVol, durationMs);
+    }
+
+    // Crossfade: BGM → 0, boss track → 0.6 over 2 seconds.
+    // Called when WraithPrime spawns (Ekman, 2008: audio layer as narrative signal).
+    startBossMusic() {
+        this._startFade('bgm',  0,   2000);
+        this._startFade('boss', 0.6, 2000);
+    }
+
+    // Reverse crossfade: boss track → 0, BGM → 0.5 over 2 seconds.
+    endBossMusic() {
+        this._startFade('boss', 0,   2000);
+        this._startFade('bgm',  0.5, 2000);
+    }
+
+    // Instant cut to normal BGM state — used on restart to skip any running fade.
+    resetBossMusic() {
+        this._cancelFade('boss');
+        this._bossVol = 0;
+        this._bgmVol  = 0.5;
+        this._apply();
+    }
+
+    // Fade all tracks to the same target — used for game-over silence.
+    fadeAllTo(targetVol, durationMs) {
+        this._startFade('bgm',  targetVol, durationMs);
+        this._startFade('boss', targetVol, durationMs);
+    }
+
+    // Apply a master duck factor to all tracks simultaneously (pause / unpause).
+    // duck(0.3) replicates the previous fadeTo(0.15) behaviour for bgm at 0.5:
+    // 0.5 × 0.3 = 0.15.  Also correctly attenuates boss music mid-encounter.
+    duck(factor = 0.3) {
+        this._duck = factor;
+        this._apply();
+    }
+
+    unduck() {
+        this._duck = 1.0;
+        this._apply();
+    }
+
+    // Toggle mute.  Duck factor and target volumes are preserved so unmuting
+    // restores the correct state regardless of the current music mode.
+    toggleMute() {
+        this.muted = !this.muted;
+        if (this.muted) {
+            this.bgm.volume     = 0;
+            this.bossBgm.volume = 0;
+        } else {
+            this._apply();
+        }
+        return this.muted;
+    }
+
+    // Stop all audio and reset to default state (exit to menu).
+    stop() {
+        this._cancelFade('bgm');
+        this._cancelFade('boss');
+        this.bgm.pause();
+        this.bgm.currentTime     = 0;
+        this.bossBgm.pause();
+        this.bossBgm.currentTime = 0;
+        this._bgmVol  = 0.5;
+        this._bossVol = 0;
+        this._duck    = 1.0;
+        this._apply();
+    }
+
+    // Write computed volumes to the HTMLAudioElements.
+    _apply() {
+        if (this.muted) return;
+        this.bgm.volume     = Math.max(0, Math.min(1, this._bgmVol  * this._duck));
+        this.bossBgm.volume = Math.max(0, Math.min(1, this._bossVol * this._duck));
+    }
+
+    // Generic setInterval-based fade for either track.
+    _startFade(track, target, durationMs) {
+        this._cancelFade(track);
+        const steps = 60;
+        const ms    = Math.max(16, durationMs / steps);
+        const start = track === 'bgm' ? this._bgmVol : this._bossVol;
+        const delta = (target - start) / steps;
+        let   step  = 0;
+        const id = setInterval(() => {
+            step++;
+            const v = Math.max(0, Math.min(1, start + delta * step));
+            if (track === 'bgm') this._bgmVol  = v;
+            else                 this._bossVol = v;
+            this._apply();
+            if (step >= steps) this._cancelFade(track);
+        }, ms);
+        if (track === 'bgm') this._bgmFade  = id;
+        else                 this._bossFade = id;
+    }
+
+    _cancelFade(track) {
+        if (track === 'bgm'  && this._bgmFade)  { clearInterval(this._bgmFade);  this._bgmFade  = null; }
+        if (track === 'boss' && this._bossFade) { clearInterval(this._bossFade); this._bossFade = null; }
+    }
+
     // ── Procedural Sound Effects (Web Audio API) ────────────────────────────
-    // AudioContext is created lazily but always first touched inside play(),
-    // which runs in a 'keydown' gesture handler — satisfying autoplay policy.
-    // All SFX are mute-aware: playSoundEffect() returns immediately if muted.
+    // AudioContext created lazily inside play() (gesture scope) and reused.
+    // All SFX exit immediately when muted.
 
     _getCtx() {
         if (!this._ctx) {
@@ -1220,8 +1713,6 @@ class AudioManager {
         return this._ctx;
     }
 
-    // Dispatch to the appropriate sound profile.
-    // data = { combo: Number } used by 'combo_ping' to scale pitch.
     playSoundEffect(type, data = {}) {
         if (this.muted) return;
         const ctx = this._getCtx();
@@ -1230,13 +1721,11 @@ class AudioManager {
             case 'corpse_collect': this._sfxCorpse(ctx);                     break;
             case 'nova_blast':     this._sfxNova(ctx);                       break;
             case 'combo_ping':     this._sfxComboPing(ctx, data.combo ?? 1); break;
+            case 'dash_zip':       this._sfxDash(ctx);                       break;
         }
     }
 
-    // High-pitched rising sine shimmer (0.2s) with a feedback delay for
-    // a short reverb tail — signals a rare, luminous pickup event.
-    // Signal chain: osc → env → lpf → output
-    //                                 ↳ delay ↔ feedback gain (converging loop)
+    // High-pitched rising sine shimmer with reverb tail — rare luminous pickup.
     _sfxFlare(ctx) {
         const now = ctx.currentTime;
         const osc = ctx.createOscillator();
@@ -1258,25 +1747,24 @@ class AudioManager {
         lpf.Q.value         = 1.5;
 
         dly.delayTime.value = 0.08;
-        fb.gain.value       = 0.38;   // < 1 so each echo is 38% of previous — converges
+        fb.gain.value       = 0.38;
 
         out.gain.value = 0.42;
 
         osc.connect(env);
         env.connect(lpf);
         lpf.connect(out);
-        lpf.connect(dly);             // feed pre-fader signal into delay for natural tail
+        lpf.connect(dly);
         dly.connect(fb);
-        fb.connect(dly);              // feedback loop
+        fb.connect(dly);
         dly.connect(out);
         out.connect(ctx.destination);
 
         osc.start(now);
-        osc.stop(now + 0.35);         // slightly longer than envelope to let delay ring out
+        osc.stop(now + 0.35);
     }
 
-    // Low-frequency triangle thump with rapid frequency drop — evokes the muffled
-    // implosion of a shadow dissolving into the ground (Farnell, 2010:240).
+    // Low-frequency triangle thump — shadow dissolving into the ground.
     _sfxCorpse(ctx) {
         const now = ctx.currentTime;
         const osc = ctx.createOscillator();
@@ -1292,7 +1780,7 @@ class AudioManager {
         env.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
 
         lpf.type            = 'lowpass';
-        lpf.frequency.value = 500;    // very dark — almost felt rather than heard
+        lpf.frequency.value = 500;
         lpf.Q.value         = 0.8;
 
         out.gain.value = 0.42;
@@ -1306,10 +1794,7 @@ class AudioManager {
         osc.stop(now + 0.15);
     }
 
-    // White-noise burst with rapidly sweeping low-pass filter — simulates an
-    // explosion that cuts to vacuum silence as the blast front passes.
-    // Farnell (2010:318) describes this filter-sweep technique as the perceptual
-    // basis for all procedural explosion sounds.
+    // White-noise burst with sweeping LPF — explosion cutting to vacuum.
     _sfxNova(ctx) {
         const now    = ctx.currentTime;
         const dur    = 0.8;
@@ -1340,12 +1825,9 @@ class AudioManager {
         out.connect(ctx.destination);
 
         src.start(now);
-        // BufferSource auto-stops when the buffer runs out
     }
 
-    // Glassy square-wave ping whose pitch rises with each combo hit —
-    // gives immediate audio feedback that the combo counter is escalating.
-    // High resonance (Q=3) on the low-pass creates the 'glass strike' timbre.
+    // Glassy square-wave ping with rising pitch per combo hit.
     _sfxComboPing(ctx, combo) {
         const now  = ctx.currentTime;
         const freq = Math.min(2200, 880 + (combo - 1) * 110);
@@ -1363,7 +1845,7 @@ class AudioManager {
 
         lpf.type            = 'lowpass';
         lpf.frequency.value = 3000;
-        lpf.Q.value         = 3.0;   // resonance peak gives the 'glassy' ring quality
+        lpf.Q.value         = 3.0;
 
         out.gain.value = 0.42;
 
@@ -1374,6 +1856,40 @@ class AudioManager {
 
         osc.start(now);
         osc.stop(now + 0.2);
+    }
+
+    // Short high-pitched 'zip' chirp for Lumen Dash.
+    // Sine sweep: 1400 Hz → 2800 Hz → 900 Hz over 120ms.
+    // High-pass at 800 Hz strips the low-mid body, leaving a bright,
+    // airy 'whoosh' that reads as fast displacement without masking gameplay SFX.
+    _sfxDash(ctx) {
+        const now = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const env = ctx.createGain();
+        const hpf = ctx.createBiquadFilter();
+        const out = ctx.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(1400, now);
+        osc.frequency.exponentialRampToValueAtTime(2800, now + 0.05);
+        osc.frequency.exponentialRampToValueAtTime(900,  now + 0.12);
+
+        env.gain.setValueAtTime(0.5, now);
+        env.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+
+        hpf.type            = 'highpass';
+        hpf.frequency.value = 800;
+        hpf.Q.value         = 2.0;
+
+        out.gain.value = 0.38;
+
+        osc.connect(env);
+        env.connect(hpf);
+        hpf.connect(out);
+        out.connect(ctx.destination);
+
+        osc.start(now);
+        osc.stop(now + 0.15);
     }
 }
 
@@ -1488,18 +2004,27 @@ class Game {
             if ((e.key === 'f' || e.key === 'F') && this.gameState === 'playing') {
                 this.player.triggerNova(this);
             }
+            // Shift triggers Lumen Dash
+            if (e.key === 'Shift' && this.gameState === 'playing') {
+                e.preventDefault();
+                this.player.triggerDash(this);
+            }
         });
 
-        // Left-click also triggers Nova (ability-gated — won't fire if not charged)
+        // Left-click triggers Nova; right-click triggers Lumen Dash.
         this.canvas.addEventListener('click', () => {
             if (this.gameState === 'playing') this.player.triggerNova(this);
+        });
+        this.canvas.addEventListener('contextmenu', e => {
+            e.preventDefault();
+            if (this.gameState === 'playing') this.player.triggerDash(this);
         });
 
         this._loadAssets();
         this._initEntities();
         this.store     = new Store(this);
         this._createPauseOverlay();
-        this.audio     = new AudioManager('./assets/audio/bg_music.mp3');
+        this.audio     = new AudioManager('./assets/audio/bg_music.mp3', './assets/audio/boss_music.mp3');
         this.time      = 0;
         this.gameState = 'menu';    // Start on the main menu before Wave 1
 
@@ -1573,14 +2098,18 @@ class Game {
         this.ignisFlares     = [];       // active IgnisFlare pickups in the world
         this.flareSpawnTimer = 0;        // counts toward FLARE_SPAWN_FRAMES (45s interval)
 
+        this.corruptionParticles = [];   // Void Trail pools from WraithPrime
+        this.currentBoss         = null; // active WraithPrime reference, or null
+        this.bossUIAlpha         = 0;    // drives boss health bar fade-in / fade-out
+
         this.gameOverTimer   = 0;        // frames elapsed in 'gameover' state (drives desaturation fade)
     }
 
     restart() {
         this._initEntities();
         this.store.hide();
-        // Audio may be at volume 0 after the gameover fade — re-start playback
-        // and fade back up so the restart feels energetic, not silent.
+        // Reset any running boss music crossfade before restoring the BGM.
+        this.audio.resetBossMusic();
         this.audio.play();
         this.audio.fadeTo(0.5, 800);
         this.gameState = 'playing';
@@ -1612,12 +2141,13 @@ class Game {
         if (this.gameState === 'playing') {
             this.gameState = 'paused';
             this.pauseOverlay.style.display = 'flex';
-            // Duck to 0.15 — low presence signals background state (Collins, 2008)
-            this.audio.fadeTo(0.15, 500);
+            // Duck all active music to 30% — affects both bgm and bossBgm
+            // so pause feels equally quiet mid-boss-encounter (Collins, 2008).
+            this.audio.duck();
         } else if (this.gameState === 'paused') {
             this.gameState = 'playing';
             this.pauseOverlay.style.display = 'none';
-            this.audio.fadeTo(0.5, 500);
+            this.audio.unduck();
         }
     }
 
@@ -1669,14 +2199,75 @@ class Game {
     }
 
     _tickWave() {
+        // Boss encounter: wave only resolves when the boss is dead.
+        if (this.currentBoss) {
+            if (this.currentBoss.dead) this._endBossWave();
+            return;
+        }
+
         this.waveTimer++;
         if (this.waveTimer >= WAVE_DURATION_FRAMES) {
             this.waveTimer = 0;
+
+            if (BOSS_WAVES.includes(this.wave)) {
+                this._spawnBoss();
+                return;
+            }
+
             this.currentSpawnFrames = Math.max(SPAWN_FRAMES_MIN, this.currentSpawnFrames - 15);
             this.currentEnemySpeed += SPEED_PER_WAVE;
             this.gameState = 'store';
             this.store.open(this.wave);
         }
+    }
+
+    // Spawns WraithPrime at the top-centre edge and locks standard spawning.
+    _spawnBoss() {
+        const cx = this.canvas.width  / 2;
+        this.currentBoss = new WraithPrime(cx, -60, this);
+        this.enemies.push(this.currentBoss);
+        this.bossUIAlpha = 0;
+        this.triggerShake(8, SHAKE_DURATION * 2);
+        this.flashFrames = Math.floor(NOVA_FLASH_FRAMES * 0.6);
+        this.shockWaves.push(new ShockWave(cx, -60, 200, '#8800cc'));
+        this.floatingTexts.push(new FloatingText(
+            cx, this.canvas.height / 2 - 80, '— WRAITH PRIME —', '#cc44ff', 20
+        ));
+        // Dynamic crossfade: ambient BGM ducks, boss music rises over 2s.
+        this.audio.startBossMusic();
+    }
+
+    // Called once WraithPrime.dead becomes true. Cleans up, rewards the player,
+    // then transitions to the upgrade store exactly as a normal wave completion would.
+    _endBossWave() {
+        const bossX = this.currentBoss.x;
+        const bossY = this.currentBoss.y;
+
+        this.audio.playSoundEffect('nova_blast');
+        this.triggerShake(NOVA_SHAKE_INT, SHAKE_DURATION * 3);
+        this.flashFrames = NOVA_FLASH_FRAMES;
+
+        // Erase all corruption from the arena
+        this.corruptionParticles = [];
+
+        // 3 IgnisFlare pickups scattered around the boss's last position
+        for (let i = 0; i < 3; i++) {
+            const angle = (i / 3) * Math.PI * 2;
+            this.ignisFlares.push(new IgnisFlare(
+                bossX + Math.cos(angle) * 55,
+                bossY + Math.sin(angle) * 55
+            ));
+        }
+
+        this.floatingTexts.push(new FloatingText(bossX, bossY - 60, 'VANQUISHED', '#ffffff', 18));
+        this.currentBoss = null;
+        // Reverse crossfade: boss music fades out, ambient BGM returns over 2s.
+        this.audio.endBossMusic();
+
+        this.currentSpawnFrames = Math.max(SPAWN_FRAMES_MIN, this.currentSpawnFrames - 15);
+        this.currentEnemySpeed += SPEED_PER_WAVE;
+        this.gameState = 'store';
+        this.store.open(this.wave);
     }
 
     _resumeFromStore() {
@@ -1770,24 +2361,43 @@ class Game {
         if (this.gameState === 'menu')    { this._updateMenu(); return; }
         if (this.gameState === 'paused')  { return; }          // world fully frozen
         if (this.gameState === 'gameover') {
-            // Kick off the cinematic volume fade on the very first gameover frame,
-            // timed to match the 2s grayscale desaturation (GAMEOVER_FADE_FRAMES).
-            if (this.gameOverTimer === 0) this.audio.fadeTo(0, 3000);
-            this.gameOverTimer++;                              // drives grayscale + overlay fade
+            // Fade all audio tracks to silence on the first gameover frame.
+            // fadeAllTo() covers both BGM and boss music so mid-encounter death
+            // doesn't leave the boss track audible behind the game-over screen.
+            if (this.gameOverTimer === 0) this.audio.fadeAllTo(0, 3000);
+            this.gameOverTimer++;
             return;
         }
         if (this.gameState !== 'playing') return;
 
         this._tickWave();
 
-        this.spawnTimer++;
-        if (this.spawnTimer >= this.currentSpawnFrames) {
-            this.spawnTimer = 0;
-            this.spawnEnemy();
+        // Standard spawns are suspended during boss encounters
+        if (!this.currentBoss) {
+            this.spawnTimer++;
+            if (this.spawnTimer >= this.currentSpawnFrames) {
+                this.spawnTimer = 0;
+                this.spawnEnemy();
+            }
+            if (this.burstCooldown > 0) this.burstCooldown--;
         }
-        if (this.burstCooldown > 0) this.burstCooldown--;
 
         this.player.update(this.mouseX, this.mouseY, this.shadowPiles, this);
+
+        // Corruption proximity — builds drain when player is near any void pool.
+        // Suppressed entirely while the player is dashing (invulnerability window).
+        if (!this.player.dashActive) {
+            for (const cp of this.corruptionParticles) {
+                if (Math.hypot(this.player.x - cp.x, this.player.y - cp.y) < CORRUPTION_DRAIN_ZONE) {
+                    this.player.corruptionDrain = Math.min(
+                        CORRUPTION_MAX_DRAIN,
+                        this.player.corruptionDrain + CORRUPTION_DRAIN_RATE
+                    );
+                    break;
+                }
+            }
+        }
+
         this.hero.update(this.enemies, this.canvas.width / 2, this.canvas.height / 2);
 
         // Hero viewport clamp — slides along canvas edges rather than walking off
@@ -1806,11 +2416,30 @@ class Game {
         }
         if (this.damageShakeCooldown > 0) this.damageShakeCooldown--;
 
-        // Dead enemies (after dissolve completes) spawn ShadowPiles
+        // Dead enemies (after dissolve) spawn ShadowPiles.
+        // WraithPrime is removed silently — its death reward is handled by _endBossWave().
         for (let i = this.enemies.length - 1; i >= 0; i--) {
-            if (this.enemies[i].dead) {
-                this.shadowPiles.push(new ShadowPile(this.enemies[i].x, this.enemies[i].y));
+            const e = this.enemies[i];
+            if (e.dead) {
+                if (!(e instanceof WraithPrime)) {
+                    this.shadowPiles.push(new ShadowPile(e.x, e.y));
+                }
                 this.enemies.splice(i, 1);
+            }
+        }
+
+        // Corruption particle lifecycle
+        for (let i = this.corruptionParticles.length - 1; i >= 0; i--) {
+            this.corruptionParticles[i].update();
+            if (this.corruptionParticles[i].dead) this.corruptionParticles.splice(i, 1);
+        }
+
+        // Boss UI alpha — fade in while alive, fade out while dissolving
+        if (this.currentBoss) {
+            if (!this.currentBoss.dying) {
+                this.bossUIAlpha = Math.min(1, this.bossUIAlpha + 1 / BOSS_FADE_FRAMES);
+            } else {
+                this.bossUIAlpha = Math.max(0, this.bossUIAlpha - 1 / BOSS_FADE_FRAMES);
             }
         }
 
@@ -1920,16 +2549,19 @@ class Game {
         ctx.save();
         ctx.textBaseline = 'alphabetic';
 
-        // ── Left panel: Wave / Score / progress bar / repel charge / nova ────
+        // ── Left panel: Wave / Score / progress bar / repel / nova / dash ────
         const repelFrac  = Math.min(1, this.player.repelTimer / REPEL_COOLDOWN);
         const repelReady = repelFrac >= 1;
         const novaFrac   = Math.min(1, this.player.novaTimer  / NOVA_COOLDOWN);
         const novaReady  = novaFrac >= 1;
+        const dashFrac   = Math.min(1, this.player.dashTimer  / DASH_COOLDOWN);
+        const dashReady  = dashFrac >= 1;
         const streak     = this.player.streakActive;
         const flareOn    = this.player.flareActive;
 
-        // Panel grows by 20px per active optional row (Flare bar + Streak row)
-        const panelH = 102 + (flareOn ? 20 : 0) + (streak ? 20 : 0);
+        // Panel grows by 20px per active optional row (Flare bar + Streak row).
+        // DASH row is always shown (122px base vs previous 102px).
+        const panelH = 122 + (flareOn ? 20 : 0) + (streak ? 20 : 0);
         ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
         ctx.beginPath();
         ctx.roundRect(pad - 8, pad - 14, 148, panelH, 6);
@@ -1941,15 +2573,17 @@ class Game {
         ctx.fillText(`WAVE   ${this.wave}`,  pad, pad);
         ctx.fillText(`SCORE  ${this.score}`, pad, pad + 22);
 
-        // Wave-progress bar
-        const pW = 130;
-        ctx.fillStyle = 'rgba(80, 80, 100, 0.5)';
-        ctx.fillRect(pad - 2, pad + 30, pW, 3);
-        ctx.fillStyle   = '#00ffff';
-        ctx.shadowColor = '#00ffff';
-        ctx.shadowBlur  = 6;
-        ctx.fillRect(pad - 2, pad + 30, pW * (this.waveTimer / WAVE_DURATION_FRAMES), 3);
-        ctx.shadowBlur  = 0;
+        // Wave-progress bar — hidden during boss encounters (boss HP bar replaces it)
+        if (!this.currentBoss) {
+            const pW = 130;
+            ctx.fillStyle = 'rgba(80, 80, 100, 0.5)';
+            ctx.fillRect(pad - 2, pad + 30, pW, 3);
+            ctx.fillStyle   = '#00ffff';
+            ctx.shadowColor = '#00ffff';
+            ctx.shadowBlur  = 6;
+            ctx.fillRect(pad - 2, pad + 30, pW * (this.waveTimer / WAVE_DURATION_FRAMES), 3);
+            ctx.shadowBlur  = 0;
+        }
 
         // Repel charge row
         ctx.font      = `bold 11px ${font}`;
@@ -1987,26 +2621,44 @@ class Game {
         ctx.fillRect(pad + 50, pad + 64, 70 * novaFrac, 3);
         ctx.shadowBlur = 0;
 
-        // Flare active bar — displayed directly below Nova when buff is running
+        // Dash charge row
+        ctx.font      = `bold 11px ${font}`;
+        ctx.fillStyle = dashReady ? '#00ffff' : 'rgba(130, 160, 190, 0.65)';
+        ctx.fillText('DASH', pad, pad + 92);
+
+        ctx.fillStyle = 'rgba(60, 60, 80, 0.5)';
+        ctx.fillRect(pad + 50, pad + 84, 70, 3);
+
+        if (dashReady) {
+            ctx.fillStyle   = '#ffffff';
+            ctx.shadowColor = '#00ffff';
+            ctx.shadowBlur  = 8;
+        } else {
+            ctx.fillStyle = 'rgba(0, 180, 180, 0.5)';
+        }
+        ctx.fillRect(pad + 50, pad + 84, 70 * dashFrac, 3);
+        ctx.shadowBlur = 0;
+
+        // Flare active bar — displayed directly below Dash when buff is running
         if (flareOn) {
             const flareFrac = this.player.flareTimer / FLARE_DURATION;
             ctx.font      = `bold 11px ${font}`;
             ctx.fillStyle = '#ffcc00';
-            ctx.fillText('FLARE', pad, pad + 92);
+            ctx.fillText('FLARE', pad, pad + 112);
 
             ctx.fillStyle = 'rgba(60, 60, 80, 0.5)';
-            ctx.fillRect(pad + 50, pad + 84, 70, 3);
+            ctx.fillRect(pad + 50, pad + 104, 70, 3);
 
             ctx.fillStyle   = '#ffcc00';
             ctx.shadowColor = '#ffcc00';
             ctx.shadowBlur  = 8;
-            ctx.fillRect(pad + 50, pad + 84, 70 * flareFrac, 3);
+            ctx.fillRect(pad + 50, pad + 104, 70 * flareFrac, 3);
             ctx.shadowBlur  = 0;
         }
 
         // Streak indicator row — shifts down 20px when Flare bar is also visible
         if (streak) {
-            const streakY = pad + 92 + (flareOn ? 20 : 0);
+            const streakY = pad + 112 + (flareOn ? 20 : 0);
             const blinkA  = 0.7 + 0.3 * Math.abs(Math.sin(this.time * 0.12));
             ctx.font         = `bold 11px ${font}`;
             ctx.globalAlpha  = blinkA;
@@ -2075,6 +2727,92 @@ class Game {
         ctx.fillText('[M]', muteX, muteY + 13);
 
         ctx.textAlign = 'left';
+        ctx.restore();
+    }
+
+    // ── Boss UI Overlay ───────────────────────────────────────────────────────────
+    // Wide health bar at top-centre. Deep purple fill, pulsing white glow border,
+    // and a tracking-heavy 'WRAITH PRIME' nameplate. Fades in/out via bossUIAlpha.
+    // Rendered above all world geometry (called after drawLighting + ctx.restore).
+    drawBossUI() {
+        if (!this.currentBoss || this.bossUIAlpha <= 0) return;
+
+        const ctx   = this.ctx;
+        const cw    = this.canvas.width;
+        const boss  = this.currentBoss;
+        const alpha = this.bossUIAlpha;
+        const t     = this.time;
+        const font  = '"Courier New", monospace';
+
+        const barW  = cw * 0.60;
+        const barH  = 14;
+        const barX  = (cw - barW) / 2;
+        const barY  = 32;
+        const hpFrac = Math.max(0, boss.hp / boss.maxHp);
+
+        ctx.save();
+        ctx.globalAlpha = alpha;
+
+        // ── Nameplate ────────────────────────────────────────────────────────
+        ctx.textAlign    = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font         = `bold 14px ${font}`;
+
+        // Letter-spaced title via wide character string for tracking effect
+        const glowA = 0.70 + 0.30 * Math.abs(Math.sin(t * 0.04));
+        ctx.fillStyle   = `rgba(210, 150, 255, ${glowA})`;
+        ctx.shadowColor = '#cc44ff';
+        ctx.shadowBlur  = 20;
+        ctx.fillText('W  R  A  I  T  H    P  R  I  M  E', cw / 2, barY - 14);
+        ctx.shadowBlur  = 0;
+
+        // ── Bar tray ─────────────────────────────────────────────────────────
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.68)';
+        ctx.beginPath();
+        ctx.roundRect(barX - 3, barY - 3, barW + 6, barH + 6, 5);
+        ctx.fill();
+
+        // ── Pulsing white glow border ─────────────────────────────────────────
+        const borderGlow = 0.50 + 0.50 * Math.abs(Math.sin(t * 0.055));
+        ctx.strokeStyle = `rgba(255, 255, 255, ${borderGlow * 0.80})`;
+        ctx.lineWidth   = 1.5;
+        ctx.shadowColor = '#ffffff';
+        ctx.shadowBlur  = 10 + borderGlow * 10;
+        ctx.beginPath();
+        ctx.roundRect(barX - 3, barY - 3, barW + 6, barH + 6, 5);
+        ctx.stroke();
+        ctx.shadowBlur  = 0;
+
+        // ── Deep purple HP fill ───────────────────────────────────────────────
+        if (hpFrac > 0) {
+            const fillW = barW * hpFrac;
+
+            // Gradient: deep indigo → vivid purple toward the leading edge
+            const fillGrad = ctx.createLinearGradient(barX, 0, barX + fillW, 0);
+            fillGrad.addColorStop(0,   '#2d006e');
+            fillGrad.addColorStop(0.7, '#5500bb');
+            fillGrad.addColorStop(1,   '#8833ee');
+            ctx.fillStyle   = fillGrad;
+            ctx.shadowColor = '#9933ff';
+            ctx.shadowBlur  = 10;
+            ctx.beginPath();
+            ctx.roundRect(barX, barY, fillW, barH, 3);
+            ctx.fill();
+            ctx.shadowBlur  = 0;
+
+            // Shimmer highlight along the top edge
+            ctx.fillStyle = 'rgba(200, 120, 255, 0.22)';
+            ctx.fillRect(barX, barY, fillW, 3);
+        }
+
+        // ── HP fraction label (right-aligned beside the bar) ─────────────────
+        ctx.font        = `bold 10px ${font}`;
+        ctx.fillStyle   = 'rgba(190, 155, 255, 0.70)';
+        ctx.textAlign   = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`${boss.hp} / ${boss.maxHp}`, barX + barW - 4, barY + barH / 2);
+
+        ctx.globalAlpha = 1;
         ctx.restore();
     }
 
@@ -2280,7 +3018,7 @@ class Game {
         const ch   = this.canvas.height;
         const font = '"Courier New", monospace';
         const panW = 256;
-        const panH = 160;
+        const panH = 186;
         const panX = cw - 28 - panW;
         const panY = ch / 2 - panH / 2;
 
@@ -2316,6 +3054,7 @@ class Game {
         const rows = [
             { key: 'SPACE', desc: 'Kinetic Repel  —  Push',       color: '#00ffff' },
             { key: 'F',     desc: 'Lumen Nova  —  Clear  (15s)',   color: '#ffffff' },
+            { key: 'SHIFT', desc: 'Lumen Dash  —  Blink  (3s)',   color: '#00ffff' },
             { key: 'HOVER', desc: 'Cleanse Shadow Piles',          color: '#b44fff' },
             { key: 'COMBO', desc: '3+ Cleans  →  Light Boost',    color: '#4cff91' },
         ];
@@ -2440,14 +3179,37 @@ class Game {
             ctx.fill();
         }
 
-        // Enemies — red dots (skip dissolving)
+        // Corruption pools — faint purple smudges
+        for (const cp of this.corruptionParticles) {
+            const p = proj(cp.x, cp.y);
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 1.5, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(140, 0, 220, 0.55)';
+            ctx.fill();
+        }
+
+        // Enemies — red dots (skip dissolving); WraithPrime gets a larger purple dot
         for (const e of this.enemies) {
             if (e.dying) continue;
+            if (e instanceof WraithPrime) continue; // drawn separately below
             const p = proj(e.x, e.y);
             ctx.beginPath();
             ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
             ctx.fillStyle = '#ff3030';
             ctx.fill();
+        }
+
+        // Boss — large pulsing purple dot
+        if (this.currentBoss && !this.currentBoss.dying) {
+            const bp    = proj(this.currentBoss.x, this.currentBoss.y);
+            const bPulse = 0.7 + 0.3 * Math.abs(Math.sin(this.time * 0.08));
+            ctx.beginPath();
+            ctx.arc(bp.x, bp.y, 5.5, 0, Math.PI * 2);
+            ctx.fillStyle   = `rgba(180, 60, 255, ${bPulse})`;
+            ctx.shadowColor = '#cc44ff';
+            ctx.shadowBlur  = 8;
+            ctx.fill();
+            ctx.shadowBlur  = 0;
         }
 
         // Hero — teal dot (larger, with glow)
@@ -2512,14 +3274,21 @@ class Game {
 
         this.drawGrid();
 
-        // Draw order: particles → ambient pulses → shockwaves → piles → flares → orbs → enemies → hero → trail → player → lighting
-        for (const p     of this.particles)     p.draw(ctx);
-        for (const ap    of this.ambientPulses) ap.draw(ctx);
-        for (const sw    of this.shockWaves)    sw.draw(ctx);
-        for (const pile  of this.shadowPiles)   pile.draw(ctx, this.cleanFrames, this.time);
-        for (const flare of this.ignisFlares)   flare.draw(ctx);
-        for (const orb   of this.healOrbs)      orb.draw(ctx);
-        for (const e     of this.enemies)       e.draw(ctx);
+        // Draw order: particles → ambient pulses → shockwaves → piles →
+        //   corruption pools → flares → orbs → enemies → boss (above all) →
+        //   hero → trail → player → lighting
+        for (const p     of this.particles)            p.draw(ctx);
+        for (const ap    of this.ambientPulses)        ap.draw(ctx);
+        for (const sw    of this.shockWaves)           sw.draw(ctx);
+        for (const pile  of this.shadowPiles)          pile.draw(ctx, this.cleanFrames, this.time);
+        for (const cp    of this.corruptionParticles)  cp.draw(ctx);
+        for (const flare of this.ignisFlares)          flare.draw(ctx);
+        for (const orb   of this.healOrbs)             orb.draw(ctx);
+        // Standard enemies first, then boss on top
+        for (const e of this.enemies) {
+            if (e !== this.currentBoss) e.draw(ctx);
+        }
+        if (this.currentBoss) this.currentBoss.draw(ctx);
         this.hero.draw(ctx);
         this.player.drawTrail(ctx);
         this.player.draw(ctx);
@@ -2544,6 +3313,9 @@ class Game {
             this.drawMenu();
             return;
         }
+
+        // Boss UI layer — above all world elements, below standard HUD
+        if (this.currentBoss) this.drawBossUI();
 
         // HUD, hero pointer and floating texts are suppressed during game over so
         // the cinematic overlay has a clean canvas to fade into.
