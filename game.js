@@ -309,14 +309,17 @@ class Player {
         }
 
         // ── Position update: dash overrides mouse follow ──────────────────────
+        // Mouse-follow (this.x = mouseX) is wholly skipped while dashActive.
+        // Velocity is applied first; the ghost is then recorded at the resulting
+        // position so each copy marks where the player actually was that frame.
         if (this.dashActive) {
-            // Capture pre-move position as next ghost copy
-            this.dashGhosts.push({ x: this.x, y: this.y, life: DASH_GHOST_LIFE });
             this.dashFrames--;
             this.x += this.dashVx;
             this.y += this.dashVy;
             this.x = Math.max(this.radius, Math.min(game.canvas.width  - this.radius, this.x));
             this.y = Math.max(this.radius, Math.min(game.canvas.height - this.radius, this.y));
+            // Spawn ghost at actual post-move coordinates for this dash frame
+            this.dashGhosts.push({ x: this.x, y: this.y, life: DASH_GHOST_LIFE });
             if (this.dashFrames <= 0) this.dashActive = false;
         } else {
             // Record previous position for the persistence-of-vision trail
@@ -2004,14 +2007,22 @@ class Game {
             if ((e.key === 'f' || e.key === 'F') && this.gameState === 'playing') {
                 this.player.triggerNova(this);
             }
-            // Shift triggers Lumen Dash
-            if (e.key === 'Shift' && this.gameState === 'playing') {
+        });
+
+        // Dedicated Shift → Lumen Dash listener, separate from the combined handler
+        // to guarantee input priority.  e.shiftKey is used (layout-independent check);
+        // e.key === 'Shift' narrows the event to the actual Shift keydown only, so
+        // Shift+F does not accidentally fire both Nova and Dash simultaneously.
+        window.addEventListener('keydown', e => {
+            if (e.shiftKey && e.key === 'Shift' && this.gameState === 'playing') {
                 e.preventDefault();
                 this.player.triggerDash(this);
             }
         });
 
         // Left-click triggers Nova; right-click triggers Lumen Dash.
+        // e.preventDefault() in the contextmenu handler suppresses the browser's
+        // native right-click menu, which would otherwise steal focus and freeze input.
         this.canvas.addEventListener('click', () => {
             if (this.gameState === 'playing') this.player.triggerNova(this);
         });
