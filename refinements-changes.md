@@ -617,3 +617,77 @@ Farnell, A. 2010. *Designing Sound*. Cambridge, MA: MIT Press.
 Nystrom, R. 2014. *Game Programming Patterns*. [Online]. Available at: https://gameprogrammingpatterns.com [Accessed 26 March 2026].
 
 Swink, S. 2009. *Game Feel: A Game Designer's Guide to Virtual Sensation*. Burlington, MA: Morgan Kaufmann.
+
+---
+
+## Entry 018 (Final) — Decision Branch Victory System and Endless Scaling
+
+**Date:** 26 March 2026
+
+**Feature summary:** Added the **Decision Branch Victory System**: when WraithPrime is defeated on Wave 10, 20, 30, or any subsequent multiple of 10, the game enters a `'milestone'` state that freezes world simulation and presents two full-screen canvas buttons — **[ENTER THE LIGHT]** (Ascend to Victory Summary) and **[STAY IN THE SHADOWS]** (Continue with Endless Scaling). If the player ascends, a 3-second white-out fade transitions to a light-themed **Victory Summary** screen showing waves endured, score, and milestones passed. If the player continues, the **Taint** system applies: `Enemy.speed += 0.1`, `spawnFrames *= 0.9`, `enemyMaxHp += 5`, and ambient darkness `+5%` per cycle. The Hero's HP is partially restored (50% of max) as a consolation. High scores (best wave and score) are persisted to `localStorage` and displayed as a dim `BEST W:X S:Y` indicator in the bottom-left corner of the HUD. Visual feedback: hovering [ENTER THE LIGHT] triggers a screen-wide white bloom (`globalAlpha` overlay); hovering [STAY IN THE SHADOWS] triggers a 3px screen shake and a procedural sub-bass hum SFX. Wave 5 boss remains a warm-up encounter that leads to the upgrade store as before; only multiples of 10 trigger the milestone branch.
+
+**Files changed:** `game.js`, `refinements-changes.md`
+
+**Technical detail:**
+
+- **Constants** — `SCALE_SPEED_INC = 0.1`, `SCALE_SPAWN_MULT = 0.9`, `SCALE_HP_INC = 5`, `TAINT_ALPHA_INC = 0.05`, `VICTORY_FADE_FRAMES = 180`. These are additive/multiplicative per `scaleLevel` increment, meaning each successive 'Continue' compounds the difficulty: after 3 continues, enemy speed has gained `3 × 0.1 = 0.3 px/frame` on top of normal per-wave scaling, spawn interval is `0.9³ ≈ 73%` of its value at milestone entry, and enemy HP is `ENEMY_MAX_HP + 15`.
+
+- **`_loadBest()` / `_saveBest(wave, score)`** — module-level functions (not Game methods) that read/write `localStorage` keys `ignis_best_wave` and `ignis_best_score`. `_saveBest` only updates if the new value strictly exceeds the stored one. Called at two points: (1) in `_endBossWave()` immediately when a boss is defeated, regardless of the milestone/store branch; (2) in `update()` on the first frame of `'gameover'` state. This ensures the best is captured even if the player quits without ever reaching a milestone.
+
+- **Enemy constructor** — extended to accept an optional `maxHp` parameter (default `ENEMY_MAX_HP`). Both `this.hp` and `this.maxHp` are initialised to this value. `spawnEnemy()` passes `this.enemyMaxHp`, which begins at `ENEMY_MAX_HP` and is incremented by `SCALE_HP_INC` on each 'Continue'. The pip renderer in `_drawPips()` is unaffected as it already iterates `this.hp`, not the constant.
+
+- **`_tickWave()` boss-wave check** — replaced the static `BOSS_WAVES.includes(this.wave)` lookup with a computed condition: `this.wave === 5 || (this.wave >= 10 && this.wave % 10 === 0)`. This makes the boss system infinite without requiring a pre-allocated array.
+
+- **`_endBossWave()` branching** — after cleanup and the standard `SPEED_PER_WAVE` step, `_saveBest()` is called, then: `this.wave % 10 === 0` → `gameState = 'milestone'`; else → `gameState = 'store'`. The standard difficulty increment (speed, spawn interval) still applies for all boss wave completions regardless of branch, since it represents the new-wave baseline rather than the milestone penalty.
+
+- **`_getMilestoneRects()`** — pure helper that derives both button `{x, y, w, h}` rectangles from the current canvas size. Called identically in `_updateMilestone()` (hover hit-testing), `_checkMilestoneClick()` (click dispatch), and `drawMilestone()` (rendering), guaranteeing that the visual hitbox and the interaction boundary are always identical.
+
+- **`_updateMilestone()`** — runs every frame while in `'milestone'` state. Computes hover state via `_getMilestoneRects()` and a point-in-rect test against `this.mouseX/Y`. Tracks `milestonePrevHover` for edge detection: when hover transitions to `'shadow'` from any other state, exactly one call to `audio.playSoundEffect('bass_hum')` and one `triggerShake(3, 10)` fires. This edge-trigger pattern prevents the SFX from spamming on every frame while the cursor rests over the button.
+
+- **`_chooseMilestone(choice)`** — choice strings are `'ascend'` (Enter the Light) and `'continue'` (Stay in the Shadows). `'ascend'` sets `gameState = 'victory'` and resets `victoryTimer = 0`. `'continue'` applies all Taint scalars, clamps `taintAlpha` to `0.06` (one cycle maximum so darkness doesn't cap out immediately), heals the hero, pushes a FloatingText announcement, and sets `gameState = 'store'` to open the Upgrade Store. The wave counter is **not** incremented here — it increments in `_resumeFromStore()` after the player selects an upgrade, preserving the existing store-resume contract. The sequence is therefore: boss defeated → milestone choice screen → (Continue) upgrade store → next wave. The store is **never** opened before the milestone choice is resolved.
+
+- **`_endBossWave()` debug log** — `console.log('Milestone Reached! Wave:', this.wave)` fires at the exact point `gameState` transitions to `'milestone'`, making the branch visible in the browser F12 console for testing. Non-milestone boss waves (wave 5) do not emit this log.
+
+- **`drawMilestone()` UI layering** — called inside a dedicated `if (gameState === 'milestone')` block in `draw()` with an immediate `return` after the call. This early-return suppresses the standard HUD, minimap, hero pointer, and boss UI, ensuring the two choice buttons render over the world without visual clutter. The world simulation has already been frozen by the `'milestone'` early-return in `update()`.
+
+- **`drawMilestone()`** — renders entirely on canvas (no DOM). Screen bloom for the light button: a white `globalAlpha` rect drawn *before* the dark overlay so its luminosity bleeds through the veil. The overlay alpha (`0.84`) is high enough that the bloom reads as diffuse haze rather than transparency. Shadow button glow uses `shadowColor = '#8800cc'` at 24px blur on both the panel border and the label text simultaneously.
+
+- **`drawVictory()`** — two-phase draw: Phase 1 (frames 0–179) draws a pure-white `fillRect` with `globalAlpha` ramping from 0 to 1, covering all world, HUD, and boss-UI layers since it is drawn last in `draw()`. Phase 2 (frame 180+) replaces the black game background with a near-white fill (`rgba(238, 242, 255, 0.97)`) and staggered-reveal text blocks gated by `Math.min(1, Math.max(0, (elapsed − delay) / 40))` — a clamp-lerp that delays each element by a fixed frame offset, producing a sequence: title (0 ms) → subtitle (20 frames) → divider (30) → stats (40) → prompts (60).
+
+- **`drawLighting()` Taint**— `const darkness = Math.min(0.99, 0.93 + this.taintAlpha)`. `taintAlpha` starts at 0 and adds 0.05 per 'Continue'. After one continue: 0.98 (barely perceptible). After two: capped at 0.99, which is near-total darkness beyond the immediate light radius. This creates a felt sense of diminishing returns — each cycle you survive makes the next harder in a visceral, visual way.
+
+- **`_sfxBassHum(ctx)`** — 800 ms sine oscillator descending from 60 Hz to 45 Hz with a 120 Hz lowpass filter. The descending pitch (rather than ascending) was chosen deliberately to convey *weight* rather than *energy* — matching the button's meaning (staying means accepting burden, not gaining momentum). Gain envelope: 0 → 0.26 over 60 ms (sharp attack), then exponential decay to near-silence.
+
+- **HUD `BEST` indicator** — rendered as a single `9px` monospace string `BEST  W:X  S:Y` at `(pad, canvas.height − pad)`. Opacity `0.38` keeps it legible but subordinate to the active gameplay data. `_loadBest()` is called every draw frame; the overhead is negligible since localStorage reads are synchronous, non-blocking, and cached by the engine at the OS level after the first call.
+
+**Logic Explanation:**
+
+- **Risk-Reward Loops and Endless Scaling**: Costikyan (2013:88) identifies the 'push your luck' structure as one of the purest expressions of uncertainty-as-mechanic: "the player must decide whether to take a known benefit now or gamble on a potentially higher reward — the tension is generated entirely by the decision, not by randomness." The milestone branch is a 'push your luck' decision in its canonical form. The player has already won: the boss is dead, the wave is complete, the upgrade store would be a comfortable reward. Choosing 'Stay in the Shadows' sacrifices that comfort for continued play, but the cost is immediate and transparent — the difficulty values are stated implicitly through prior experience (the player *knows* faster enemies are harder). Costikyan (2013:91) further argues that push-your-luck decisions are most compelling when the failure state is legible and the success state is cumulative — both conditions hold here: failure means dying in darkness, success accumulates score, upgrades, and the personal pride of a higher 'BEST' wave.
+
+- **The Taint as Felt Difficulty**: Standard difficulty scaling (speed, spawn rate, HP) is statistical — the player perceives it indirectly through outcomes (dying faster, clearing piles slower). `taintAlpha` exerts difficulty through *aesthetics*: the light literally shrinks. The same enemy that was killable at a comfortable distance is now visible for fewer frames before it enters the player's reduced radius. This is an example of what Schell (2008:184) calls 'embedded difficulty' — the mechanical and experiential layers reinforce each other rather than presenting difficulty as an abstract number. The player does not read `+0.1 speed` from a tooltip; they feel the darkness closing in.
+
+- **The Asymmetric Victory Screen**: The Victory Summary uses a white-filled background and dark-ink typography — the visual inverse of the game's normal black-and-cyan aesthetic. This is intentional: the Victory screen should feel like *leaving* the game world rather than continuing inside it. The white-out transition (a cinema convention for redemption or death by light) was preferred over a black fade or iris-out precisely because the game's theme is about a player who is *made of light* — white-out is the logical expression of that metaphor reaching its conclusion. Isbister (2016:96) notes that "contrast between gameplay and resolution aesthetics is a primary signal that the emotional register has permanently shifted."
+
+**AI Collaboration Note:** AI (Cursor / Claude) proposed `_getMilestoneRects()` as a shared helper rather than computing the button rects independently in three call sites (update, click, draw), citing the risk of a single-pixel misalignment between the visual hitbox and the interaction boundary — a category of bug that is invisible in development but visible to players who notice the button registering slightly outside its visible area. AI also proposed Phase 2 of `drawVictory()` using a clamp-lerp (`Math.min(1, Math.max(0, (elapsed - delay) / 40))`) rather than a `setTimeout` stagger, arguing that frame-count-based reveals remain synchronised with the game loop and cannot desync if the tab loses focus or the browser throttles timers. The observation that `taintAlpha` should be capped at 0.06 (one `TAINT_ALPHA_INC` unit above the initial 0) was offered to prevent total darkness after only two milestones — the cap ensures the effect is perceptible and meaningful without being immediately decisive.
+
+---
+
+**References**
+
+Collins, K. 2008. *Game Sound: An Introduction to the History, Theory, and Practice of Video Game Music and Sound Design*. Cambridge, MA: MIT Press.
+
+Costikyan, G. 2013. *Uncertainty in Games*. Cambridge, MA: MIT Press.
+
+Ekman, I. 2008. 'Psychologically motivated techniques for emotional sound in computer games', in *Proceedings of the Audio Mostly Conference*. Piteå: Interactive Institute.
+
+Farnell, A. 2010. *Designing Sound*. Cambridge, MA: MIT Press.
+
+Isbister, K. 2016. *How Games Move Us: Emotion by Design*. Cambridge, MA: MIT Press.
+
+Nystrom, R. 2014. *Game Programming Patterns*. [Online]. Available at: https://gameprogrammingpatterns.com [Accessed 26 March 2026].
+
+Rogers, S. 2014. *Level Up! The Guide to Great Video Game Design*. 2nd ed. Chichester: John Wiley & Sons.
+
+Schell, J. 2008. *The Art of Game Design: A Book of Lenses*. Burlington, MA: Morgan Kaufmann.
+
+Swink, S. 2009. *Game Feel: A Game Designer's Guide to Virtual Sensation*. Burlington, MA: Morgan Kaufmann.

@@ -75,6 +75,14 @@ const DASH_DISTANCE   = 120;   // px total travel per dash
 const DASH_FRAMES     = 4;     // animation frames for the dash
 const DASH_GHOST_LIFE = 12;    // frames a ghost copy persists (~200ms)
 
+// ─── Endless Scaling & Victory Constants ──────────────────────────────────────
+
+const SCALE_SPEED_INC     = 0.1;    // speed bonus added per 'Continue' milestone
+const SCALE_SPAWN_MULT    = 0.9;    // spawn-interval multiplier per 'Continue'
+const SCALE_HP_INC        = 5;      // enemy max-HP bonus per 'Continue'
+const TAINT_ALPHA_INC     = 0.05;   // ambient darkness added to light overlay per 10-wave cycle
+const VICTORY_FADE_FRAMES = 180;    // white-out fade duration before summary (3s at 60fps)
+
 // ─── Wraith Prime Boss Constants ──────────────────────────────────────────────
 
 const WRAITH_HP               = 40;    // boss health pool
@@ -101,6 +109,24 @@ const UPGRADE_DEFS = [
     { id: 'armor',   name: 'SPIRIT ARMOR',        stat: '+15%  Damage Resist',   lore: 'The Hero endures the darkness.',         icon: '⬡', color: '#7ecfff' },
     { id: 'healing', name: 'HEALING RESONANCE',   stat: '+20%  Orb Potency',     lore: 'Orbs resonate with greater force.',      icon: '❋', color: '#4cff91' },
 ];
+
+// ─── High-Score Persistence ───────────────────────────────────────────────────
+// localStorage keys: 'ignis_best_wave' and 'ignis_best_score'.
+// Functions are module-level so they can be called from both Game and any
+// future sub-system without creating a dependency on the Game instance.
+
+function _loadBest() {
+    return {
+        wave:  parseInt(localStorage.getItem('ignis_best_wave')  || '0', 10),
+        score: parseInt(localStorage.getItem('ignis_best_score') || '0', 10),
+    };
+}
+
+function _saveBest(wave, score) {
+    const best = _loadBest();
+    if (wave  > best.wave)  localStorage.setItem('ignis_best_wave',  String(wave));
+    if (score > best.score) localStorage.setItem('ignis_best_score', String(score));
+}
 
 // ─── FloatingText ─────────────────────────────────────────────────────────────
 // Short-lived diegetic label that drifts upward and fades — used for score
@@ -933,12 +959,13 @@ class Hero {
 // 'Shadow Wraith' — flickering tendrils, dark form, red pulsing core.
 
 class Enemy {
-    constructor(x, y, speed = ENEMY_BASE_SPEED) {
+    constructor(x, y, speed = ENEMY_BASE_SPEED, maxHp = ENEMY_MAX_HP) {
         this.x            = x;
         this.y            = y;
         this.radius       = 12;
         this.speed        = speed;
-        this.hp           = ENEMY_MAX_HP;
+        this.maxHp        = maxHp;
+        this.hp           = maxHp;
         this.dead         = false;
         this.dying        = false;         // true = dissolve animation running
         this.dyingFrames  = 0;
@@ -1725,6 +1752,7 @@ class AudioManager {
             case 'nova_blast':     this._sfxNova(ctx);                       break;
             case 'combo_ping':     this._sfxComboPing(ctx, data.combo ?? 1); break;
             case 'dash_zip':       this._sfxDash(ctx);                       break;
+            case 'bass_hum':       this._sfxBassHum(ctx);                    break;
         }
     }
 
@@ -1894,6 +1922,34 @@ class AudioManager {
         osc.start(now);
         osc.stop(now + 0.15);
     }
+
+    // Deep sub-bass rumble (60 Hz → 45 Hz), 800 ms duration.
+    // Triggered on first hover of the 'Stay in the Shadows' milestone button.
+    // Frequency descent mimics gravitational weight — the world pulling the player back.
+    _sfxBassHum(ctx) {
+        const now = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const env = ctx.createGain();
+        const lpf = ctx.createBiquadFilter();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(60, now);
+        osc.frequency.exponentialRampToValueAtTime(45, now + 0.8);
+
+        env.gain.setValueAtTime(0, now);
+        env.gain.linearRampToValueAtTime(0.26, now + 0.06);
+        env.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+
+        lpf.type            = 'lowpass';
+        lpf.frequency.value = 120;
+
+        osc.connect(lpf);
+        lpf.connect(env);
+        env.connect(ctx.destination);
+
+        osc.start(now);
+        osc.stop(now + 0.85);
+    }
 }
 
 // ─── Store ────────────────────────────────────────────────────────────────────
@@ -1982,11 +2038,12 @@ class Game {
         });
 
         window.addEventListener('keydown', e => {
-            if ((e.key === 'r' || e.key === 'R') && this.gameState === 'gameover') {
+            if ((e.key === 'r' || e.key === 'R') &&
+                (this.gameState === 'gameover' || this.gameState === 'victory')) {
                 this.restart();
             }
             if (e.key === 'm' || e.key === 'M') {
-                if (this.gameState === 'gameover') {
+                if (this.gameState === 'gameover' || this.gameState === 'victory') {
                     this._exitToMenu();
                 } else {
                     this._toggleMute();
@@ -2024,7 +2081,8 @@ class Game {
         // e.preventDefault() in the contextmenu handler suppresses the browser's
         // native right-click menu, which would otherwise steal focus and freeze input.
         this.canvas.addEventListener('click', () => {
-            if (this.gameState === 'playing') this.player.triggerNova(this);
+            if      (this.gameState === 'playing')   this.player.triggerNova(this);
+            else if (this.gameState === 'milestone')  this._checkMilestoneClick();
         });
         this.canvas.addEventListener('contextmenu', e => {
             e.preventDefault();
@@ -2114,6 +2172,16 @@ class Game {
         this.bossUIAlpha         = 0;    // drives boss health bar fade-in / fade-out
 
         this.gameOverTimer   = 0;        // frames elapsed in 'gameover' state (drives desaturation fade)
+
+        // ── Endless Scaling ───────────────────────────────────────────────────
+        this.taintAlpha   = 0;             // darkness accumulator: +5% per 'Continue' milestone
+        this.scaleLevel   = 0;             // how many 'Continue' choices have been made
+        this.enemyMaxHp   = ENEMY_MAX_HP;  // current enemy HP ceiling (scales with Continue)
+
+        // ── Milestone / Victory state ─────────────────────────────────────────
+        this.milestoneHover     = null;    // 'light' | 'shadow' | null
+        this.milestonePrevHover = null;    // previous frame hover — used for edge detection
+        this.victoryTimer       = 0;       // frames elapsed in 'victory' white-out + summary
     }
 
     restart() {
@@ -2205,7 +2273,7 @@ class Game {
             else if (edge === 2) { x = Math.random() * w; y = h + 20; }
             else                 { x = -20;                y = Math.random() * h; }
 
-            this.enemies.push(new Enemy(x, y, this.currentEnemySpeed));
+            this.enemies.push(new Enemy(x, y, this.currentEnemySpeed, this.enemyMaxHp));
         }
     }
 
@@ -2220,7 +2288,9 @@ class Game {
         if (this.waveTimer >= WAVE_DURATION_FRAMES) {
             this.waveTimer = 0;
 
-            if (BOSS_WAVES.includes(this.wave)) {
+            // Wave 5 = warm-up boss; wave 10, 20, 30... = milestone bosses.
+            const isBossWave = this.wave === 5 || (this.wave >= 10 && this.wave % 10 === 0);
+            if (isBossWave) {
                 this._spawnBoss();
                 return;
             }
@@ -2275,10 +2345,99 @@ class Game {
         // Reverse crossfade: boss music fades out, ambient BGM returns over 2s.
         this.audio.endBossMusic();
 
+        // Standard per-wave difficulty step applied regardless of milestone branch
         this.currentSpawnFrames = Math.max(SPAWN_FRAMES_MIN, this.currentSpawnFrames - 15);
         this.currentEnemySpeed += SPEED_PER_WAVE;
-        this.gameState = 'store';
-        this.store.open(this.wave);
+
+        // Persist the best immediately so any path (Victory/Continue/Quit) is captured
+        _saveBest(this.wave, this.score);
+
+        // Waves 10, 20, 30… trigger the Decision Branch milestone screen.
+        // The Upgrade Store is NOT opened here on milestone waves — it is deferred
+        // to _chooseMilestone('continue') so the player always sees the choice first.
+        // Wave 5 is a warm-up boss and goes directly to the store (no milestone).
+        if (this.wave % 10 === 0) {
+            console.log('Milestone Reached! Wave:', this.wave);
+            this.gameState = 'milestone';
+        } else {
+            this.gameState = 'store';
+            this.store.open(this.wave);
+        }
+    }
+
+    // Returns the two milestone button rectangles, computed from the current canvas size.
+    // Used by both the update hover-check and the draw method to guarantee consistency.
+    _getMilestoneRects() {
+        const cw = this.canvas.width;
+        const ch = this.canvas.height;
+        const btnW = 260, btnH = 64;
+        return {
+            lightRect:  { x: cw / 2 - btnW - 20, y: ch / 2 + 24, w: btnW, h: btnH },
+            shadowRect: { x: cw / 2 + 20,         y: ch / 2 + 24, w: btnW, h: btnH },
+        };
+    }
+
+    // Runs every frame while gameState === 'milestone'.
+    // Tracks mouse hover over the two buttons; on hover-start for 'Stay in Shadows',
+    // triggers a bass hum SFX and a brief screen shake.
+    _updateMilestone() {
+        const { lightRect, shadowRect } = this._getMilestoneRects();
+        const mx = this.mouseX, my = this.mouseY;
+        const hit = (r) => mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h;
+
+        this.milestonePrevHover = this.milestoneHover;
+        if      (hit(lightRect))  this.milestoneHover = 'light';
+        else if (hit(shadowRect)) this.milestoneHover = 'shadow';
+        else                       this.milestoneHover = null;
+
+        // Edge-triggered SFX + shake on first frame entering the 'shadow' button
+        if (this.milestoneHover === 'shadow' && this.milestonePrevHover !== 'shadow') {
+            this.audio.playSoundEffect('bass_hum');
+            this.triggerShake(3, 10);
+        }
+    }
+
+    // Hit-tests the mouse against the milestone button rects and dispatches the choice.
+    // Choice strings are 'ascend' (Enter the Light) and 'continue' (Stay in the Shadows).
+    _checkMilestoneClick() {
+        const { lightRect, shadowRect } = this._getMilestoneRects();
+        const mx = this.mouseX, my = this.mouseY;
+        const hit = (r) => mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h;
+        if      (hit(lightRect))  this._chooseMilestone('ascend');
+        else if (hit(shadowRect)) this._chooseMilestone('continue');
+    }
+
+    // Handles the two milestone outcomes.
+    // 'ascend'   → white-out fade into the Victory Summary screen.
+    // 'continue' → apply Endless Scaling Taint, heal hero, then open the Upgrade Store
+    //              (the wave counter increments in _resumeFromStore() after the store closes).
+    _chooseMilestone(choice) {
+        if (choice === 'ascend') {
+            // ASCEND — white-out fade then victory summary
+            this.gameState  = 'victory';
+            this.victoryTimer = 0;
+        } else {
+            // CONTINUE — apply Endless Scaling Taint, heal hero, open upgrade store
+            this.scaleLevel++;
+            this.currentEnemySpeed  += SCALE_SPEED_INC;
+            this.currentSpawnFrames  = Math.max(
+                SPAWN_FRAMES_MIN,
+                Math.round(this.currentSpawnFrames * SCALE_SPAWN_MULT)
+            );
+            this.enemyMaxHp         += SCALE_HP_INC;
+            this.taintAlpha          = Math.min(0.06, this.taintAlpha + TAINT_ALPHA_INC);
+
+            // Partial heal — 50% of Hero's max HP
+            this.hero.hp = Math.min(HERO_MAX_HP, this.hero.hp + HERO_MAX_HP * 0.5);
+
+            this.floatingTexts.push(new FloatingText(
+                this.canvas.width / 2, this.canvas.height / 2 - 60,
+                'THE  DARKNESS  DEEPENS…', '#cc44ff', 16
+            ));
+
+            this.gameState = 'store';
+            this.store.open(this.wave);
+        }
     }
 
     _resumeFromStore() {
@@ -2375,10 +2534,26 @@ class Game {
             // Fade all audio tracks to silence on the first gameover frame.
             // fadeAllTo() covers both BGM and boss music so mid-encounter death
             // doesn't leave the boss track audible behind the game-over screen.
-            if (this.gameOverTimer === 0) this.audio.fadeAllTo(0, 3000);
+            if (this.gameOverTimer === 0) {
+                this.audio.fadeAllTo(0, 3000);
+                _saveBest(this.wave, this.score);
+            }
             this.gameOverTimer++;
             return;
         }
+
+        // ── Milestone choice screen — world frozen, hover tracking active ─────
+        if (this.gameState === 'milestone') {
+            this._updateMilestone();
+            return;
+        }
+
+        // ── Victory white-out + summary — just tick the timer ─────────────────
+        if (this.gameState === 'victory') {
+            this.victoryTimer++;
+            return;
+        }
+
         if (this.gameState !== 'playing') return;
 
         this._tickWave();
@@ -2530,7 +2705,10 @@ class Game {
         const lc = this.lightCtx;
 
         lc.clearRect(0, 0, this.lightCanvas.width, this.lightCanvas.height);
-        lc.fillStyle = 'rgba(0, 0, 0, 0.93)';
+        // taintAlpha adds up to +6% darkness per 'Continue' milestone, making
+        // the player's light feel progressively smaller each cycle.
+        const darkness = Math.min(0.99, 0.93 + this.taintAlpha);
+        lc.fillStyle = `rgba(0, 0, 0, ${darkness})`;
         lc.fillRect(0, 0, this.lightCanvas.width, this.lightCanvas.height);
 
         lc.globalCompositeOperation = 'destination-out';
@@ -2738,6 +2916,19 @@ class Game {
         ctx.fillText('[M]', muteX, muteY + 13);
 
         ctx.textAlign = 'left';
+
+        // ── Personal Best — bottom-left corner ───────────────────────────────
+        const best = _loadBest();
+        if (best.wave > 0) {
+            ctx.font      = `9px ${font}`;
+            ctx.textAlign = 'left';
+            ctx.fillStyle = 'rgba(150, 170, 210, 0.38)';
+            ctx.fillText(
+                `BEST  W:${best.wave}  S:${best.score}`,
+                pad, this.canvas.height - pad
+            );
+        }
+
         ctx.restore();
     }
 
@@ -2822,6 +3013,218 @@ class Game {
         ctx.textAlign   = 'right';
         ctx.textBaseline = 'middle';
         ctx.fillText(`${boss.hp} / ${boss.maxHp}`, barX + barW - 4, barY + barH / 2);
+
+        ctx.globalAlpha = 1;
+        ctx.restore();
+    }
+
+    // ── Milestone Choice Overlay ──────────────────────────────────────────────────
+    // Full-screen dark veil with two large buttons:
+    //   [ENTER THE LIGHT]      — Ascend: white-out → Victory Summary
+    //   [STAY IN THE SHADOWS]  — Continue: apply Taint scaling, open upgrade store
+    // Hover effects:
+    //   Light button  → screen-wide white bloom (shadowBlur wash)
+    //   Shadow button → screen shake + bass hum (triggered by _updateMilestone)
+    drawMilestone() {
+        const ctx  = this.ctx;
+        const cw   = this.canvas.width;
+        const ch   = this.canvas.height;
+        const cx   = cw / 2;
+        const cy   = ch / 2;
+        const font = '"Courier New", monospace';
+        const t    = this.time;
+
+        const { lightRect: lr, shadowRect: sr } = this._getMilestoneRects();
+        const lightHov  = this.milestoneHover === 'light';
+        const shadowHov = this.milestoneHover === 'shadow';
+
+        ctx.save();
+        ctx.textAlign    = 'center';
+        ctx.textBaseline = 'middle';
+
+        // ── Screen bloom on "Enter the Light" hover ───────────────────────────
+        if (lightHov) {
+            const bloomA = 0.10 + 0.06 * Math.abs(Math.sin(t * 0.08));
+            ctx.fillStyle = `rgba(255, 255, 255, ${bloomA})`;
+            ctx.fillRect(0, 0, cw, ch);
+        }
+
+        // Dark overlay
+        ctx.fillStyle = 'rgba(5, 5, 20, 0.84)';
+        ctx.fillRect(0, 0, cw, ch);
+
+        // ── Title ─────────────────────────────────────────────────────────────
+        const titlePulse = 0.82 + 0.18 * Math.abs(Math.sin(t * 0.025));
+        ctx.font        = `bold 34px ${font}`;
+        ctx.fillStyle   = `rgba(210, 185, 255, ${titlePulse})`;
+        ctx.shadowColor = '#9933ff';
+        ctx.shadowBlur  = 28;
+        ctx.fillText('MILESTONE  REACHED', cx, cy - 110);
+        ctx.shadowBlur  = 0;
+
+        // Wave badge
+        ctx.font      = `14px ${font}`;
+        ctx.fillStyle = 'rgba(170, 200, 240, 0.62)';
+        ctx.fillText(`WAVE  ${this.wave}  COMPLETE`, cx, cy - 68);
+
+        // Thin horizontal rule
+        ctx.strokeStyle = 'rgba(180, 100, 255, 0.22)';
+        ctx.lineWidth   = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(cx - 200, cy - 42);
+        ctx.lineTo(cx + 200, cy - 42);
+        ctx.stroke();
+
+        // Sub-prompt
+        ctx.font      = `11px ${font}`;
+        ctx.fillStyle = 'rgba(160, 185, 230, 0.52)';
+        ctx.fillText('Choose your fate.', cx, cy - 12);
+
+        // ── ENTER THE LIGHT button ────────────────────────────────────────────
+        ctx.save();
+        ctx.fillStyle   = lightHov ? 'rgba(230, 245, 255, 0.20)' : 'rgba(20, 40, 60, 0.55)';
+        ctx.strokeStyle = lightHov ? 'rgba(255, 255, 255, 0.90)' : 'rgba(80, 180, 240, 0.32)';
+        ctx.lineWidth   = lightHov ? 1.5 : 0.8;
+        if (lightHov) { ctx.shadowColor = '#ffffff'; ctx.shadowBlur = 32; }
+        ctx.beginPath();
+        ctx.roundRect(lr.x, lr.y, lr.w, lr.h, 8);
+        ctx.fill();
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+
+        ctx.font        = `bold 15px ${font}`;
+        ctx.fillStyle   = lightHov ? '#ffffff' : 'rgba(170, 230, 255, 0.82)';
+        if (lightHov) { ctx.shadowColor = '#ffffff'; ctx.shadowBlur = 22; }
+        ctx.fillText('ENTER  THE  LIGHT', lr.x + lr.w / 2, lr.y + lr.h / 2 - 10);
+        ctx.shadowBlur = 0;
+
+        ctx.font      = `10px ${font}`;
+        ctx.fillStyle = lightHov ? 'rgba(215, 240, 255, 0.72)' : 'rgba(120, 175, 210, 0.44)';
+        ctx.fillText('Ascend  ·  End the journey here', lr.x + lr.w / 2, lr.y + lr.h / 2 + 13);
+        ctx.restore();
+
+        // ── STAY IN THE SHADOWS button ────────────────────────────────────────
+        ctx.save();
+        ctx.fillStyle   = shadowHov ? 'rgba(80, 0, 130, 0.58)' : 'rgba(18, 4, 32, 0.62)';
+        ctx.strokeStyle = shadowHov ? 'rgba(190, 60, 255, 0.95)' : 'rgba(120, 40, 200, 0.38)';
+        ctx.lineWidth   = shadowHov ? 1.5 : 0.8;
+        if (shadowHov) { ctx.shadowColor = '#8800cc'; ctx.shadowBlur = 24; }
+        ctx.beginPath();
+        ctx.roundRect(sr.x, sr.y, sr.w, sr.h, 8);
+        ctx.fill();
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+
+        ctx.font        = `bold 15px ${font}`;
+        ctx.fillStyle   = shadowHov ? '#cc66ff' : 'rgba(155, 75, 255, 0.82)';
+        if (shadowHov) { ctx.shadowColor = '#cc44ff'; ctx.shadowBlur = 20; }
+        ctx.fillText('STAY  IN  THE  SHADOWS', sr.x + sr.w / 2, sr.y + sr.h / 2 - 10);
+        ctx.shadowBlur = 0;
+
+        ctx.font      = `10px ${font}`;
+        ctx.fillStyle = shadowHov ? 'rgba(200, 140, 255, 0.75)' : 'rgba(140, 80, 200, 0.44)';
+        ctx.fillText('Continue  ·  Endure  ·  Grow stronger', sr.x + sr.w / 2, sr.y + sr.h / 2 + 13);
+        ctx.restore();
+
+        // Click hint
+        const hintA = 0.28 + 0.22 * Math.abs(Math.sin(t * 0.045));
+        ctx.font      = `9px ${font}`;
+        ctx.fillStyle = `rgba(130, 155, 195, ${hintA})`;
+        ctx.fillText('Click a button to choose', cx, cy + 130);
+
+        ctx.restore();
+    }
+
+    // ── Victory Summary ───────────────────────────────────────────────────────────
+    // Phase 1 (frames 0–VICTORY_FADE_FRAMES): white-out rect fades in over the world.
+    // Phase 2 (after fade): bright clean summary with staggered text reveal.
+    drawVictory() {
+        const ctx  = this.ctx;
+        const cw   = this.canvas.width;
+        const ch   = this.canvas.height;
+        const cx   = cw / 2;
+        const cy   = ch / 2;
+        const font = '"Courier New", monospace';
+        const t    = this.victoryTimer;
+
+        ctx.save();
+        ctx.textAlign    = 'center';
+        ctx.textBaseline = 'middle';
+
+        if (t < VICTORY_FADE_FRAMES) {
+            // Phase 1 — white-out
+            const fa = t / VICTORY_FADE_FRAMES;
+            ctx.globalAlpha = fa;
+            ctx.fillStyle   = '#ffffff';
+            ctx.fillRect(0, 0, cw, ch);
+        } else {
+            // Phase 2 — summary screen (light-themed, contrasts the dark game-over)
+            const elapsed = t - VICTORY_FADE_FRAMES;
+
+            ctx.fillStyle = 'rgba(238, 242, 255, 0.97)';
+            ctx.fillRect(0, 0, cw, ch);
+
+            const fade = (delay) => Math.min(1, Math.max(0, (elapsed - delay) / 40));
+
+            // Title
+            ctx.globalAlpha  = fade(0);
+            ctx.font         = `bold 50px Georgia, "Times New Roman", serif`;
+            ctx.fillStyle    = '#1a1050';
+            ctx.shadowColor  = 'rgba(80, 40, 180, 0.30)';
+            ctx.shadowBlur   = 22;
+            ctx.fillText('THE LIGHT ENDURES', cx, cy - 108);
+            ctx.shadowBlur   = 0;
+
+            // Sub-title
+            ctx.globalAlpha = fade(20);
+            ctx.font        = `11px ${font}`;
+            ctx.fillStyle   = 'rgba(70, 55, 135, 0.62)';
+            ctx.fillText('— YOUR JOURNEY IS COMPLETE —', cx, cy - 64);
+
+            // Divider
+            const dW = 300;
+            ctx.globalAlpha = fade(30);
+            ctx.strokeStyle = 'rgba(80, 55, 160, 0.22)';
+            ctx.lineWidth   = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(cx - dW / 2, cy - 42); ctx.lineTo(cx + dW / 2, cy - 42);
+            ctx.stroke();
+
+            // Stats
+            ctx.globalAlpha = fade(40);
+            ctx.font      = `13px ${font}`;
+            ctx.textAlign = 'right';
+            ctx.fillStyle = 'rgba(55, 45, 110, 0.62)';
+            ctx.fillText('Waves Endured',     cx - 14, cy - 12);
+            ctx.fillText('Shadows Purged',    cx - 14, cy + 14);
+            ctx.fillText('Milestones Passed', cx - 14, cy + 40);
+
+            ctx.textAlign = 'left';
+            ctx.font      = `bold 13px ${font}`;
+            ctx.fillStyle = 'rgba(25, 18, 80, 0.92)';
+            ctx.fillText(`${this.wave}`,       cx + 22, cy - 12);
+            ctx.fillText(`${this.score}`,       cx + 22, cy + 14);
+            ctx.fillText(`${this.scaleLevel}`,  cx + 22, cy + 40);
+
+            // Second divider
+            ctx.globalAlpha = fade(50);
+            ctx.textAlign   = 'center';
+            ctx.strokeStyle = 'rgba(80, 55, 160, 0.22)';
+            ctx.lineWidth   = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(cx - dW / 2, cy + 58); ctx.lineTo(cx + dW / 2, cy + 58);
+            ctx.stroke();
+
+            // Prompts
+            const promptA = 0.45 + 0.45 * Math.abs(Math.sin(this.time * 0.04));
+            ctx.globalAlpha = fade(60) * promptA;
+            ctx.font        = `12px ${font}`;
+            ctx.fillStyle   = 'rgba(50, 38, 110, 0.82)';
+            ctx.shadowColor = 'rgba(80, 55, 200, 0.35)';
+            ctx.shadowBlur  = 8;
+            ctx.fillText('[R]  Restart          [M]  Return to Menu', cx, cy + 92);
+            ctx.shadowBlur  = 0;
+        }
 
         ctx.globalAlpha = 1;
         ctx.restore();
@@ -3325,6 +3728,14 @@ class Game {
             return;
         }
 
+        // Milestone choice screen — drawMilestone() draws over the world.
+        // Early-return suppresses the standard HUD, minimap, hero pointer, and
+        // boss UI so the two choice buttons render without visual clutter.
+        if (this.gameState === 'milestone') {
+            this.drawMilestone();
+            return;
+        }
+
         // Boss UI layer — above all world elements, below standard HUD
         if (this.currentBoss) this.drawBossUI();
 
@@ -3339,6 +3750,9 @@ class Game {
 
         // Cinematic game-over drawn last so its dark veil covers everything
         if (this.gameState === 'gameover') this.drawGameOver();
+
+        // Victory white-out + summary drawn on top of everything
+        if (this.gameState === 'victory') this.drawVictory();
     }
 
     loop() {
