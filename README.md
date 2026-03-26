@@ -36,7 +36,7 @@ All AI-generated contributions are documented in `refinements-changes.md` to mai
 Project Reflection: Ignis Fatuus
 AI Excellence & Limitations
 
-AI was extremely good in Rapid Prototyping and Procedural Generation. It allowed me to implement a complex Web Audio synthesizer and a Finite State Machine in hours rather than days. However, it occasionally hallucinated during the Lumen Dash implementation, where it struggled to create the mouse-follow logic with velocity-based movement. I had to step in as the Lead Developer to manually override the input priority, proving that while AI can provide the "bricks," the developer must provide the "blueprint."
+AI was extremely good in Rapid Prototyping and Procedural Generation. It allowed me to implement a complex Web Audio synthesizer and a Finite State Machine in hours rather than days. However, it occasionally hallucinated during the Lumen Dash implementation, where it struggled to  the mouse-follow logic with velocity-based movement. I had to step in as the Lead Developer to manually override the input priority, proving that while AI can provide the "bricks," the developer must provide the "blueprint."
 Alteration of Process
 
 The collaboration shifted my process from "Writing Code" to "Architectural Orchestration." Instead of getting bogged down in syntax, I focused on Game Feel (Swink, 2009) and Difficulty Scaling. My technical process became iterative: I would prompt a core mechanic, test the "juice" (screenshake, particles), and then use AI to "refactor" for performance. Next time, I would spend more time defining the Data Schema upfront to prevent the AI from hallucinating variable names between sessions.
