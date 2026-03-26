@@ -1,4 +1,29 @@
-// ─── Constants ────────────────────────────────────────────────────────────────
+/**
+ * ════════════════════════════════════════════════════════════════════
+ *  Project:        Ignis Fatuus
+ *  Lead Developer: Jet Kingston
+ *  ────────────────────────────────────────────────────────────────────
+ *  Vision: A browser-based survival game where the player embodies a
+ *          living Spark of light tasked with protecting a fragile Hero
+ *          from encroaching shadow entities. Mastery emerges from
+ *          managing the light economy — balancing aggressive cleansing,
+ *          ability timing, and endurance through escalating boss
+ *          encounters that culminate in a consequential choice between
+ *          Ascension and Endless Darkness.
+ * ════════════════════════════════════════════════════════════════════
+ */
+
+// ─── Balance Tuning ───────────────────────────────────────────────────────────
+// All difficulty-scaling multipliers live here. Adjust these values for
+// balancing passes without hunting through the full constants block.
+
+const SCALE_SPEED_INC     = 0.1;    // enemy speed bonus per 'Continue' milestone
+const SCALE_SPAWN_MULT    = 0.9;    // spawn-interval multiplier per 'Continue'
+const SCALE_HP_INC        = 5;      // enemy max-HP increment per 'Continue'
+const TAINT_ALPHA_INC     = 0.05;   // ambient-darkness increase per 10-wave cycle
+const VICTORY_FADE_FRAMES = 180;    // white-out fade frames before Victory Summary (3s)
+
+// ─── Engine & Display Constants ───────────────────────────────────────────────
 
 const PLAYER_RADIUS       = 8;
 const PLAYER_LIGHT_RADIUS = 130;
@@ -66,22 +91,12 @@ const MINIMAP_MARGIN = 20;    // px inset from canvas corner
 
 const MENU_CIRCLE_RADIUS = 220;  // px — safe-zone barrier ring radius in MENU state
 
-// ─── Wraith Prime Boss Constants ──────────────────────────────────────────────
-
 // ─── Lumen Dash Constants ─────────────────────────────────────────────────────
 
 const DASH_COOLDOWN   = 180;   // 3s at 60fps
 const DASH_DISTANCE   = 120;   // px total travel per dash
 const DASH_FRAMES     = 4;     // animation frames for the dash
 const DASH_GHOST_LIFE = 12;    // frames a ghost copy persists (~200ms)
-
-// ─── Endless Scaling & Victory Constants ──────────────────────────────────────
-
-const SCALE_SPEED_INC     = 0.1;    // speed bonus added per 'Continue' milestone
-const SCALE_SPAWN_MULT    = 0.9;    // spawn-interval multiplier per 'Continue'
-const SCALE_HP_INC        = 5;      // enemy max-HP bonus per 'Continue'
-const TAINT_ALPHA_INC     = 0.05;   // ambient darkness added to light overlay per 10-wave cycle
-const VICTORY_FADE_FRAMES = 180;    // white-out fade duration before summary (3s at 60fps)
 
 // ─── Wraith Prime Boss Constants ──────────────────────────────────────────────
 
@@ -93,7 +108,6 @@ const WRAITH_GRAVITY_PULL     = 0.12;  // lerp fraction applied each well-fire
 const WRAITH_TRAIL_INTERVAL   = 10;    // frames between Void Trail deposits
 const WRAITH_DISSOLVE_FRAMES  = 90;    // 1.5s boss death dissolve
 const BOSS_FADE_FRAMES        = 60;    // UI fade-in / fade-out duration in frames
-const BOSS_WAVES              = [5, 10]; // which waves trigger a boss encounter
 
 const CORRUPTION_LIFETIME     = 480;   // 8s — how long a corruption pool persists
 const CORRUPTION_DRAIN_ZONE   = 20;    // px — player proximity that activates drain
@@ -327,6 +341,19 @@ class Player {
         // this.img is intentionally absent — resolved via Player.prototype.img after asset load
     }
 
+    /**
+     * Per-frame simulation step for the Player (The Spark).
+     *
+     * Dash invulnerability: while {@link dashActive} is true, mouse-following is
+     * suspended and the pre-computed {@link dashVx}/{@link dashVy} velocity is
+     * applied instead. Corruption drain accumulation and recovery are also gated
+     * on `!dashActive`, providing a true I-frame window during the blink.
+     *
+     * @param {number}       mouseX      - Cursor X in canvas coordinates.
+     * @param {number}       mouseY      - Cursor Y in canvas coordinates.
+     * @param {ShadowPile[]} shadowPiles - Mutable array; cleansed piles are spliced.
+     * @param {Game}         game        - Live game reference (canvas, audio, entities).
+     */
     update(mouseX, mouseY, shadowPiles, game) {
         // ── Ghost copy aging — tick every frame regardless of dash state ──────
         for (let i = this.dashGhosts.length - 1; i >= 0; i--) {
@@ -463,12 +490,17 @@ class Player {
         }
     }
 
-    // Emit shockwave, knock back + stun all enemies within REPEL_RADIUS.
-    // Initial knockback velocity of 15px/frame with 0.85 friction gives ~100px
-    // total displacement over the stun window (geometric series: 15/(1-0.85) = 100).
-    // Emit shockwave, knock back + stun all enemies within REPEL_RADIUS.
-    // When Ignis Flare is active ('Holy Repel' mode), the shockwave turns gold
-    // and any enemy within range is instantly vaporised instead of stunned.
+    /**
+     * Emit a shockwave, knock back, and stun all enemies within REPEL_RADIUS.
+     * Knockback: 15 px/frame initial with 0.85 friction ≈ 100 px total displacement
+     * (geometric series: 15 / (1 − 0.85) = 100).
+     *
+     * When Ignis Flare is active ('Holy Repel' mode), the shockwave turns gold
+     * and standard enemies vaporise instantly; WraithPrime takes 5 fixed damage
+     * instead of being one-shot to preserve the boss-encounter challenge.
+     *
+     * @param {Game} game - Live game reference for particles, shockwaves, and audio.
+     */
     triggerRepel(game) {
         this.repelTimer = 0;
         game.triggerShake(REPEL_SHAKE_INT, SHAKE_DURATION);
@@ -520,8 +552,18 @@ class Player {
         }
     }
 
-    // Lumen Nova — instant 400px vaporise blast.  15s gated ability (F or click).
-    // White-hot shockwave + heavy screen shake + white flash communicates "panic button".
+    /**
+     * Lumen Nova — instant 400 px vaporise blast (F key or left-click).
+     *
+     * All standard enemies within {@link NOVA_RADIUS} are dissolved; WraithPrime
+     * takes 20 fixed damage instead to preserve the boss-encounter arc.
+     * White-hot shockwave + heavy screen shake + full-screen flash communicates
+     * the "panic button" nature of the ability (Swink, 2009: kinetic feedback).
+     *
+     * Cooldown: {@link NOVA_COOLDOWN} frames (15 s).
+     *
+     * @param {Game} game - Live game reference for audio, particles, and shake.
+     */
     triggerNova(game) {
         if (this.novaTimer < NOVA_COOLDOWN) return;
         this.novaTimer = 0;
@@ -582,9 +624,21 @@ class Player {
         game.floatingTexts.push(new FloatingText(this.x, this.y - 65, 'LUMEN NOVA!', '#ffffff', 18));
     }
 
-    // Lumen Dash — blink 120 px toward the cursor in 4 frames.
-    // Invulnerable to corruption drain during the dash.
-    // Cooldown: 3s (DASH_COOLDOWN frames), visualised as a charging arc.
+    /**
+     * Lumen Dash — blink 120 px toward the cursor over 4 frames.
+     *
+     * Direction is captured once at call-time from `game.mouseX/Y` and stored as
+     * fixed `dashVx`/`dashVy` scalars. Subsequent mouse movement has no effect
+     * until the dash completes, preventing mid-dash curve artefacts.
+     *
+     * A ghost copy is seeded at the departure point here; four additional ghosts
+     * are deposited in {@link update} at post-move positions during the dash frames.
+     *
+     * Cooldown: {@link DASH_COOLDOWN} frames (3 s). Visualised as a charging arc
+     * around the player sprite in {@link drawSprite}.
+     *
+     * @param {Game} game - Live game reference for mouse position and audio.
+     */
     triggerDash(game) {
         if (this.dashTimer < DASH_COOLDOWN) return;
 
@@ -1632,14 +1686,22 @@ class AudioManager {
         this._startFade('bgm', targetVol, durationMs);
     }
 
-    // Crossfade: BGM → 0, boss track → 0.6 over 2 seconds.
-    // Called when WraithPrime spawns (Ekman, 2008: audio layer as narrative signal).
+    /**
+     * Crossfade: ambient BGM → 0, boss track → 0.6 over 2 seconds.
+     * Called when WraithPrime spawns. The musical shift functions as a narrative
+     * announcement of the elite threat before any mechanical damage occurs
+     * (Ekman, 2008: audio layer as primary threat signal).
+     */
     startBossMusic() {
         this._startFade('bgm',  0,   2000);
         this._startFade('boss', 0.6, 2000);
     }
 
-    // Reverse crossfade: boss track → 0, BGM → 0.5 over 2 seconds.
+    /**
+     * Reverse crossfade: boss track → 0, ambient BGM → 0.5 over 2 seconds.
+     * Called on boss defeat. The musical exhale signals safety and rewards the
+     * player emotionally before any UI confirms the outcome (Ekman, 2008).
+     */
     endBossMusic() {
         this._startFade('boss', 0,   2000);
         this._startFade('bgm',  0.5, 2000);
@@ -2127,12 +2189,24 @@ class Game {
         this.assets = { player: playerImg, hero: heroImg, enemy: enemyImg };
     }
 
-    // Clamp to the largest requested shake so overlapping events don't cancel each other.
+    /**
+     * Request a screen shake. Clamps to the largest pending values so that
+     * simultaneous events (e.g. Nova + boss spawn) compound rather than cancelling.
+     *
+     * @param {number} intensity - Max pixel displacement per frame.
+     * @param {number} duration  - Number of frames the shake lasts.
+     */
     triggerShake(intensity, duration) {
         if (intensity >= this.shakeIntensity) this.shakeIntensity = intensity;
         if (duration  >  this.shakeFrames)    this.shakeFrames    = duration;
     }
 
+    /**
+     * (Re)initialise all game-world entities and state to their Wave-1 defaults.
+     * Called on first construction, restart, and exit-to-menu. Resets all
+     * difficulty scalars, endless-scaling counters, and taint alpha so a new
+     * run always starts from a clean baseline.
+     */
     _initEntities() {
         const cx = this.canvas.width  / 2;
         const cy = this.canvas.height / 2;
@@ -2277,6 +2351,15 @@ class Game {
         }
     }
 
+    /**
+     * Per-frame wave-state machine. Advances the wave timer; on expiry:
+     *  - Wave 5 or any multiple of 10 → spawn WraithPrime (boss encounter).
+     *  - All other waves → standard difficulty step + open upgrade store.
+     *
+     * While `currentBoss` is alive, the timer is frozen and only boss-death
+     * is polled — the wave cannot advance until WraithPrime is defeated.
+     * This makes the wave a decisive confrontation rather than an endurance clock.
+     */
     _tickWave() {
         // Boss encounter: wave only resolves when the boss is dead.
         if (this.currentBoss) {
@@ -2318,8 +2401,17 @@ class Game {
         this.audio.startBossMusic();
     }
 
-    // Called once WraithPrime.dead becomes true. Cleans up, rewards the player,
-    // then transitions to the upgrade store exactly as a normal wave completion would.
+    /**
+     * Called once {@link WraithPrime.dead} becomes true. Performs boss-death cleanup
+     * (corruption erase, flare rewards, audio crossfade), applies the standard
+     * per-wave difficulty step, persists the personal best, then branches:
+     *
+     *  - `wave % 10 === 0` → Decision Branch milestone screen (`'milestone'` state).
+     *  - Otherwise (wave 5 warm-up boss) → upgrade store directly.
+     *
+     * The Upgrade Store is never opened before the milestone choice is resolved;
+     * it is deferred to {@link _chooseMilestone} when `'continue'` is selected.
+     */
     _endBossWave() {
         const bossX = this.currentBoss.x;
         const bossY = this.currentBoss.y;
@@ -2357,7 +2449,6 @@ class Game {
         // to _chooseMilestone('continue') so the player always sees the choice first.
         // Wave 5 is a warm-up boss and goes directly to the store (no milestone).
         if (this.wave % 10 === 0) {
-            console.log('Milestone Reached! Wave:', this.wave);
             this.gameState = 'milestone';
         } else {
             this.gameState = 'store';
@@ -2377,9 +2468,14 @@ class Game {
         };
     }
 
-    // Runs every frame while gameState === 'milestone'.
-    // Tracks mouse hover over the two buttons; on hover-start for 'Stay in Shadows',
-    // triggers a bass hum SFX and a brief screen shake.
+    /**
+     * Per-frame update for the `'milestone'` state. World simulation is frozen;
+     * this method only performs hover hit-testing against the two choice buttons.
+     *
+     * Edge-triggered pattern: the bass hum SFX and screen shake fire exactly once
+     * on the **first frame** the cursor enters the 'Stay in the Shadows' button,
+     * preventing per-frame audio spam while the cursor rests over the button.
+     */
     _updateMilestone() {
         const { lightRect, shadowRect } = this._getMilestoneRects();
         const mx = this.mouseX, my = this.mouseY;
@@ -2407,10 +2503,15 @@ class Game {
         else if (hit(shadowRect)) this._chooseMilestone('continue');
     }
 
-    // Handles the two milestone outcomes.
-    // 'ascend'   → white-out fade into the Victory Summary screen.
-    // 'continue' → apply Endless Scaling Taint, heal hero, then open the Upgrade Store
-    //              (the wave counter increments in _resumeFromStore() after the store closes).
+    /**
+     * Resolves the Decision Branch choice shown on the milestone screen.
+     *
+     * @param {'ascend'|'continue'} choice
+     *   - `'ascend'`   → Victory white-out fade then summary screen.
+     *   - `'continue'` → Apply Endless Scaling Taint, partially heal the Hero,
+     *                    then open the Upgrade Store. The wave counter increments
+     *                    in {@link _resumeFromStore} after the player picks an upgrade.
+     */
     _chooseMilestone(choice) {
         if (choice === 'ascend') {
             // ASCEND — white-out fade then victory summary
@@ -3432,7 +3533,7 @@ class Game {
         const ch   = this.canvas.height;
         const font = '"Courier New", monospace';
         const panW = 256;
-        const panH = 186;
+        const panH = 238;   // 5 ability rows + 2 system rows × 26px + 50px header
         const panX = cw - 28 - panW;
         const panY = ch / 2 - panH / 2;
 
@@ -3471,6 +3572,8 @@ class Game {
             { key: 'SHIFT', desc: 'Lumen Dash  —  Blink  (3s)',   color: '#00ffff' },
             { key: 'HOVER', desc: 'Cleanse Shadow Piles',          color: '#b44fff' },
             { key: 'COMBO', desc: '3+ Cleans  →  Light Boost',    color: '#4cff91' },
+            { key: 'ESC',   desc: 'Pause  /  Unpause',             color: '#9999cc' },
+            { key: 'M',     desc: 'Toggle Mute',                   color: '#9999cc' },
         ];
 
         ctx.font = `bold 10px ${font}`;
