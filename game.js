@@ -17,9 +17,9 @@
 // All difficulty-scaling multipliers live here. Adjust these values for
 // balancing passes without hunting through the full constants block.
 
-const SCALE_SPEED_INC     = 0.1;    // enemy speed bonus per 'Continue' milestone
-const SCALE_SPAWN_MULT    = 0.9;    // spawn-interval multiplier per 'Continue'
-const SCALE_HP_INC        = 5;      // enemy max-HP increment per 'Continue'
+const SCALE_SPEED_INC     = 0.1;    // late-tier enemy speed bonus per 'Continue' milestone
+const SCALE_SPAWN_MULT    = 0.9;    // late-tier spawn-interval multiplier per 'Continue'
+const SCALE_HP_INC        = 5;      // late-tier enemy max-HP increment per 'Continue'
 const TAINT_ALPHA_INC     = 0.05;   // ambient-darkness increase per 10-wave cycle
 const VICTORY_FADE_FRAMES = 180;    // white-out fade frames before Victory Summary (3s)
 
@@ -29,6 +29,8 @@ const PLAYER_RADIUS       = 8;
 const PLAYER_LIGHT_RADIUS = 130;
 const PULSE_AMPLITUDE     = 15;
 const PULSE_SPEED         = 0.04;
+const PLAYER_LIGHT_READABILITY_BONUS = 16; // keeps nearby space readable without lifting global darkness
+const PLAYER_LIGHT_THREAT_BONUS_MAX  = 22; // adaptive light gain under heavy combat load
 
 const HERO_SPEED          = 1.8;
 const HERO_ATTACK_RANGE   = 35;
@@ -36,16 +38,12 @@ const HERO_ATTACK_FRAMES  = 60;
 const HERO_MAX_HP         = 100;
 const GHOST_DRAIN_SPEED   = 0.025;
 
-const ENEMY_BASE_SPEED      = 0.9;
+const ENEMY_BASE_SPEED      = 0.72;
 const ENEMY_MAX_HP          = 3;
-const ENEMY_SPAWN_FRAMES    = 180;
+const ENEMY_SPAWN_FRAMES    = 240;
 const SPAWN_FRAMES_MIN      = 60;
 const SPEED_PER_WAVE        = 0.08;
 const ENEMY_DISSOLVE_FRAMES = 10;   // shrink+fade frames before ShadowPile spawns
-
-const REPEL_COOLDOWN    = 300;      // 5s auto-fire interval at 60fps
-const REPEL_RADIUS      = 150;      // px shockwave reach
-const REPEL_STUN_FRAMES = 60;       // 1s stun window
 
 const SHADOW_CLEAN_FRAMES  = 90;
 const HEAL_ORB_LERP        = 0.05;
@@ -68,7 +66,6 @@ const NOVA_COOLDOWN      = 900;   // 15s at 60fps
 const NOVA_RADIUS        = 400;   // px — instant-vaporise blast radius
 const NOVA_SHAKE_INT     = 10;    // screen shake intensity units
 const NOVA_FLASH_FRAMES  = 30;    // white flash fades over this many frames (~0.5s)
-const REPEL_SHAKE_INT    = 4;     // screen shake intensity for Pulse Repel
 const SHAKE_DURATION     = 14;    // default shake duration in frames
 
 const COMBO_EXPIRE_FRAMES = 180;  // 3s window before combo resets
@@ -90,13 +87,53 @@ const MINIMAP_SCALE  = 0.10;  // world-to-minimap coordinate multiplier
 const MINIMAP_MARGIN = 20;    // px inset from canvas corner
 
 const MENU_CIRCLE_RADIUS = 220;  // px — safe-zone barrier ring radius in MENU state
+const TUTORIAL_AUTO_RETURN_FRAMES = 180; // 3s on final tutorial card before returning
 
-// ─── Lumen Dash Constants ─────────────────────────────────────────────────────
+const TUTORIAL_STEPS = [
+    {
+        title: 'WELCOME, SPARK',
+        lines: [
+            'You are the living light.',
+            'Your duty is to keep the Hero alive',
+            'while the shadows close in.',
+        ],
+    },
+    {
+        title: 'CORE MOVEMENT',
+        lines: [
+            'Move your cursor to move the Spark.',
+            'Stay near Shadow Piles to cleanse them.',
+            'Cleansing grants score, embers, and healing orbs.',
+        ],
+    },
+    {
+        title: 'COMBAT ABILITY',
+        lines: [
+            'Press F or Left Click to fire NOVA.',
+            'Nova clears nearby threats and recharges over time.',
+            'Protect the Hero while you manage light.',
+        ],
+    },
+    {
+        title: 'OBJECTIVES & WORLD',
+        lines: [
+            'Wave goals appear from mid-run — follow GOAL on the HUD.',
+            'Sanctuaries cleanse corruption and charge Nova.',
+            'Seal rifts and prime sigils when they appear.',
+        ],
+    },
+    {
+        title: 'FINAL BRIEFING',
+        lines: [
+            'Protect the Hero. Keep your rhythm.',
+            'Master light, movement, and timing.',
+            'Good luck, Warden of the Flame.',
+        ],
+        final: true,
+    },
+];
 
-const DASH_COOLDOWN   = 180;   // 3s at 60fps
-const DASH_DISTANCE   = 120;   // px total travel per dash
-const DASH_FRAMES     = 4;     // animation frames for the dash
-const DASH_GHOST_LIFE = 12;    // frames a ghost copy persists (~200ms)
+const PLAYER_CONTRAST_RING_RADIUS = 1.55; // readability ring scale around player core
 
 // ─── Wraith Prime Boss Constants ──────────────────────────────────────────────
 
@@ -115,6 +152,39 @@ const CORRUPTION_DRAIN_RATE   = 2.0;   // px of lightRadius penalty added per fr
 const CORRUPTION_RECOVERY     = 0.5;   // px recovered per frame when clear
 const CORRUPTION_MAX_DRAIN    = 70;    // px ceiling on corruption penalty
 
+// ─── Purpose, Objectives, and Interaction Constants ───────────────────────────
+
+const EMBERS_PER_PURIFY            = 1;
+const STORE_REROLL_COST            = 4;
+const WAVE_OBJECTIVE_INTERVAL      = 3;    // objective every 3 waves from wave 3+
+const OBJECTIVE_INTRO_WAVE         = 3;    // keep early waves free of goal/interactable load
+const OBJECTIVE_REWARD_EMBERS      = 6;
+const OBJECTIVE_CAPTURE_RADIUS_PAD = 20;
+const OBJECTIVE_ESCORT_FRAMES      = 240;  // 4s escort objective
+const OBJECTIVE_PURGE_TARGET       = 4;
+const OBJECTIVE_RIFT_TARGET        = 3;
+const OBJECTIVE_GATE_WAVE_START    = 10;   // mixed-gate: only milestone waves can require objective
+
+const BEACON_RADIUS          = 70;
+const BEACON_ACTIVATE_FRAMES = 70;
+const BEACON_ACTIVE_FRAMES   = 900;   // 15s
+const BEACON_DRAIN_RECOVERY  = 1.8;   // sanctuary cleanses corruption drain quickly
+const BEACON_NOVA_BONUS      = 0.55;  // extra Nova charge per frame while sheltered
+const SIGIL_PRIME_FRAMES     = 55;
+const SIGIL_TRIGGER_RADIUS   = 58;
+const VENT_SEAL_FRAMES       = 90;
+const VENT_CORRUPT_INTERVAL  = 45;
+const VENT_CORRUPT_RADIUS    = 22;
+
+const BOLT_SPEED          = 3.2;
+const BOLT_HIT_RADIUS     = 8;
+const HEXER_ATTACK_FRAMES = 120;
+
+// ─── Performance Guards ───────────────────────────────────────────────────────
+
+const PARTICLE_SOFT_CAP          = 420; // soft cap for transient VFX particles
+const MINIMAP_UPDATE_INTERVAL    = 2;   // redraw minimap every N frames
+
 // ─── Upgrade Definitions ──────────────────────────────────────────────────────
 
 const UPGRADE_DEFS = [
@@ -122,6 +192,12 @@ const UPGRADE_DEFS = [
     { id: 'purge',   name: 'PURGE SPEED',         stat: '−0.3s  Purification',   lore: 'Cleanse Shadow Piles faster.',           icon: '⊕', color: '#b44fff' },
     { id: 'armor',   name: 'SPIRIT ARMOR',        stat: '+15%  Damage Resist',   lore: 'The Hero endures the darkness.',         icon: '⬡', color: '#7ecfff' },
     { id: 'healing', name: 'HEALING RESONANCE',   stat: '+20%  Orb Potency',     lore: 'Orbs resonate with greater force.',      icon: '❋', color: '#4cff91' },
+];
+
+const RELIC_PATH_DEFS = [
+    { id: 'purifierPath', name: 'PURIFIER OATH', stat: 'Purify faster + objective focus', lore: 'The Spark becomes a ritual blade.', icon: '✶', color: '#b44fff' },
+    { id: 'guardianPath', name: 'GUARDIAN OATH', stat: 'Hero protection + beacon synergy', lore: 'Light bends toward protection.', icon: '⬢', color: '#7ecfff' },
+    { id: 'tempestPath',  name: 'TEMPEST OATH',  stat: 'Nova cadence accelerates', lore: 'Storm-light overwhelms the abyss.', icon: '⚡', color: '#ffe566' },
 ];
 
 // ─── High-Score Persistence ───────────────────────────────────────────────────
@@ -173,8 +249,10 @@ class FloatingText {
         ctx.fillStyle    = this.color;
         ctx.textAlign    = 'center';
         ctx.textBaseline = 'middle';
-        ctx.shadowColor  = this.color;
-        ctx.shadowBlur   = 10;
+        if (this.size >= 13) {
+            ctx.shadowColor  = this.color;
+            ctx.shadowBlur   = 8;
+        }
         ctx.fillText(this.text, this.x, this.y);
         ctx.shadowBlur   = 0;
         ctx.restore();
@@ -204,25 +282,22 @@ class Particle {
     get dead() { return this.life <= 0; }
 
     draw(ctx) {
-        ctx.save();
-        ctx.globalAlpha = Math.max(0, this.life);
+        const a = Math.max(0, this.life);
+        ctx.globalAlpha = a;
         ctx.beginPath();
-        ctx.arc(this.x, this.y, this.r * this.life, 0, Math.PI * 2);
-        ctx.fillStyle   = this.color;
-        ctx.shadowColor = this.color;
-        ctx.shadowBlur  = 8;
+        ctx.arc(this.x, this.y, this.r * a, 0, Math.PI * 2);
+        ctx.fillStyle = this.color;
         ctx.fill();
-        ctx.restore();
+        ctx.globalAlpha = 1;
     }
 }
 
 // ─── ShockWave ────────────────────────────────────────────────────────────────
-// Expanding ring visual spawned by Pulse Repel. Lifetime: ~18 frames.
+// Expanding ring visual used by abilities and interactable bursts.
 
 class ShockWave {
-    // maxRadius and color are optional — defaults produce the standard Repel ring.
-    // Nova passes NOVA_RADIUS and '#ffffff' to get a larger white-hot blast ring.
-    constructor(x, y, maxRadius = REPEL_RADIUS, color = '#00ffff') {
+    // maxRadius and color are optional — Nova and interactables pass custom values.
+    constructor(x, y, maxRadius = 150, color = '#00ffff') {
         this.x         = x;
         this.y         = y;
         this.radius    = 0;
@@ -249,7 +324,7 @@ class ShockWave {
         ctx.strokeStyle = this.color;
         ctx.lineWidth   = Math.max(0.5, 3.5 * a);
         ctx.shadowColor = this.color;
-        ctx.shadowBlur  = 24;
+        ctx.shadowBlur  = 10;
         ctx.stroke();
 
         // Inner echo ring
@@ -282,8 +357,16 @@ class AmbientPulse {
         this.radius += SCOUT_MAX_RADIUS / SCOUT_FRAMES;
 
         // Wavefront width ≈ 24px — boost any pile the ring is passing over
+        const outer = this.radius + 24;
+        const inner = Math.max(0, this.radius - 24);
+        const outerSq = outer * outer;
+        const innerSq = inner * inner;
         for (const pile of shadowPiles) {
-            const dist = Math.hypot(this.x - pile.x, this.y - pile.y);
+            const dx = this.x - pile.x;
+            const dy = this.y - pile.y;
+            const distSq = dx * dx + dy * dy;
+            if (distSq > outerSq || distSq < innerSq) continue;
+            const dist = Math.sqrt(distSq);
             const proximity = 1 - Math.abs(dist - this.radius) / 24;
             if (proximity > 0) pile.glowBoost = Math.max(pile.glowBoost, proximity);
         }
@@ -320,7 +403,6 @@ class Player {
         this.lightRadius        = PLAYER_LIGHT_RADIUS;
         this.currentLightRadius = PLAYER_LIGHT_RADIUS;
         this.orbitAngle   = 0;
-        this.repelTimer   = 0;             // starts uncharged; auto-fires after first 5s
         this.novaTimer    = NOVA_COOLDOWN; // starts ready on first game frame
         this.trail        = [];            // ring buffer of last TRAIL_LENGTH {x,y} positions
         this.comboCount   = 0;
@@ -330,24 +412,11 @@ class Player {
         this.flareActive     = false;      // true while Ignis Flare buff is running
         this.flareTimer      = 0;         // counts down from FLARE_DURATION to 0
         this.corruptionDrain = 0;         // accumulated light-radius penalty from boss corruption
-
-        // ── Lumen Dash ─────────────────────────────────────────────────────────
-        this.dashTimer  = DASH_COOLDOWN;  // starts ready
-        this.dashActive = false;          // true during the 4-frame movement phase
-        this.dashFrames = 0;              // countdown within the dash
-        this.dashVx     = 0;             // per-frame velocity during dash
-        this.dashVy     = 0;
-        this.dashGhosts = [];             // [{x, y, life}] fading ghost copies
         // this.img is intentionally absent — resolved via Player.prototype.img after asset load
     }
 
     /**
      * Per-frame simulation step for the Player (The Spark).
-     *
-     * Dash invulnerability: while {@link dashActive} is true, mouse-following is
-     * suspended and the pre-computed {@link dashVx}/{@link dashVy} velocity is
-     * applied instead. Corruption drain accumulation and recovery are also gated
-     * on `!dashActive`, providing a true I-frame window during the blink.
      *
      * @param {number}       mouseX      - Cursor X in canvas coordinates.
      * @param {number}       mouseY      - Cursor Y in canvas coordinates.
@@ -355,46 +424,17 @@ class Player {
      * @param {Game}         game        - Live game reference (canvas, audio, entities).
      */
     update(mouseX, mouseY, shadowPiles, game) {
-        // ── Ghost copy aging — tick every frame regardless of dash state ──────
-        for (let i = this.dashGhosts.length - 1; i >= 0; i--) {
-            this.dashGhosts[i].life--;
-            if (this.dashGhosts[i].life <= 0) this.dashGhosts.splice(i, 1);
-        }
-
-        // ── Position update: dash overrides mouse follow ──────────────────────
-        // Mouse-follow (this.x = mouseX) is wholly skipped while dashActive.
-        // Velocity is applied first; the ghost is then recorded at the resulting
-        // position so each copy marks where the player actually was that frame.
-        if (this.dashActive) {
-            this.dashFrames--;
-            this.x += this.dashVx;
-            this.y += this.dashVy;
-            this.x = Math.max(this.radius, Math.min(game.canvas.width  - this.radius, this.x));
-            this.y = Math.max(this.radius, Math.min(game.canvas.height - this.radius, this.y));
-            // Spawn ghost at actual post-move coordinates for this dash frame
-            this.dashGhosts.push({ x: this.x, y: this.y, life: DASH_GHOST_LIFE });
-            if (this.dashFrames <= 0) this.dashActive = false;
-        } else {
-            // Record previous position for the persistence-of-vision trail
-            this.trail.push({ x: this.x, y: this.y });
-            if (this.trail.length > TRAIL_LENGTH) this.trail.shift();
-            this.x = mouseX;
-            this.y = mouseY;
-            this.x = Math.max(this.radius, Math.min(game.canvas.width  - this.radius, this.x));
-            this.y = Math.max(this.radius, Math.min(game.canvas.height - this.radius, this.y));
-        }
+        // Record previous position for the persistence-of-vision trail
+        this.trail.push({ x: this.x, y: this.y });
+        if (this.trail.length > TRAIL_LENGTH) this.trail.shift();
+        this.x = mouseX;
+        this.y = mouseY;
+        this.x = Math.max(this.radius, Math.min(game.canvas.width  - this.radius, this.x));
+        this.y = Math.max(this.radius, Math.min(game.canvas.height - this.radius, this.y));
 
         this.orbitAngle += 0.035;
 
-        // ── Dash cooldown charge ──────────────────────────────────────────────
-        if (this.dashTimer < DASH_COOLDOWN) {
-            this.dashTimer++;
-            if (this.dashTimer === DASH_COOLDOWN) {
-                game.floatingTexts.push(new FloatingText(
-                    this.x, this.y - 40, 'DASH  READY', '#00ffff', 11
-                ));
-            }
-        }
+        const tempestBoost = game.relicPath === 'tempestPath' ? 1 : 0;
 
         // Combo window countdown — resets count and streak when expired
         if (this.comboTimer > 0) {
@@ -413,9 +453,7 @@ class Player {
 
         // Streak bonus: +50% light radius when combo streak is active
         // Flare bonus: Luminous Overload — doubles effective light radius
-        // Corruption drain: recovered only while NOT dashing (dash grants immunity).
-        // Accumulation via proximity check in Game.update() is also suppressed during dash.
-        if (!this.dashActive && this.corruptionDrain > 0) {
+        if (this.corruptionDrain > 0) {
             this.corruptionDrain = Math.max(0, this.corruptionDrain - CORRUPTION_RECOVERY);
         }
         this.streakBonus = this.streakActive ? this.lightRadius * COMBO_STREAK_BONUS : 0;
@@ -427,13 +465,10 @@ class Player {
             + Math.sin(game.time * PULSE_SPEED) * PULSE_AMPLITUDE
         );
 
-        // Repel charge & auto-fire
-        if (this.repelTimer < REPEL_COOLDOWN) this.repelTimer++;
-        if (this.repelTimer >= REPEL_COOLDOWN) this.triggerRepel(game);
-
         // Nova charge (no auto-fire — manual only)
         if (this.novaTimer < NOVA_COOLDOWN) {
-            this.novaTimer++;
+            this.novaTimer += 1 + tempestBoost;
+            if (this.novaTimer > NOVA_COOLDOWN) this.novaTimer = NOVA_COOLDOWN;
             if (this.novaTimer === NOVA_COOLDOWN) {
                 game.floatingTexts.push(new FloatingText(
                     this.x, this.y - 50, 'NOVA READY', '#ffffff', 13
@@ -443,14 +478,21 @@ class Player {
 
         for (let i = shadowPiles.length - 1; i >= 0; i--) {
             const pile = shadowPiles[i];
-            const dist = Math.hypot(this.x - pile.x, this.y - pile.y);
+            const dx = this.x - pile.x;
+            const dy = this.y - pile.y;
 
-            if (dist < pile.radius + this.radius + 10) {
+            const captureRange = Math.max(
+                pile.radius + this.radius + 10,
+                Math.min(this.currentLightRadius * 0.33, 90) + OBJECTIVE_CAPTURE_RADIUS_PAD
+            );
+            if ((dx * dx + dy * dy) < captureRange * captureRange) {
                 pile.hoverFrames++;
                 if (pile.hoverFrames >= game.cleanFrames) {
                     game.healOrbs.push(new HealOrb(pile.x, pile.y));
                     game.score += SCORE_PER_PILE;
+                    game.embers += EMBERS_PER_PURIFY;
                     shadowPiles.splice(i, 1);
+                    game._onPilePurified();
 
                     // ── Combo logic ──────────────────────────────────────────
                     this.comboCount++;
@@ -486,68 +528,6 @@ class Player {
                 }
             } else {
                 pile.hoverFrames = 0;
-            }
-        }
-    }
-
-    /**
-     * Emit a shockwave, knock back, and stun all enemies within REPEL_RADIUS.
-     * Knockback: 15 px/frame initial with 0.85 friction ≈ 100 px total displacement
-     * (geometric series: 15 / (1 − 0.85) = 100).
-     *
-     * When Ignis Flare is active ('Holy Repel' mode), the shockwave turns gold
-     * and standard enemies vaporise instantly; WraithPrime takes 5 fixed damage
-     * instead of being one-shot to preserve the boss-encounter challenge.
-     *
-     * @param {Game} game - Live game reference for particles, shockwaves, and audio.
-     */
-    triggerRepel(game) {
-        this.repelTimer = 0;
-        game.triggerShake(REPEL_SHAKE_INT, SHAKE_DURATION);
-
-        const repelColor = this.flareActive ? '#ffcc00' : '#00ffff';
-        game.shockWaves.push(new ShockWave(this.x, this.y, REPEL_RADIUS, repelColor));
-
-        // Radial particle burst — gold during Flare
-        for (let i = 0; i < 28; i++) {
-            const angle = (i / 28) * Math.PI * 2;
-            const p = new Particle(this.x, this.y, repelColor);
-            p.vx = Math.cos(angle) * (3 + Math.random() * 2.5);
-            p.vy = Math.sin(angle) * (3 + Math.random() * 2.5);
-            game.particles.push(p);
-        }
-
-        for (const enemy of game.enemies) {
-            if (enemy.dying) continue;
-            const dist = Math.hypot(this.x - enemy.x, this.y - enemy.y);
-            if (dist < REPEL_RADIUS && dist > 0) {
-                const isBoss = enemy instanceof WraithPrime;
-                if (this.flareActive) {
-                    // Holy Repel — boss: heavy damage; standard enemies: vaporize
-                    for (let j = 0; j < 8; j++) {
-                        const p = new Particle(enemy.x, enemy.y, '#ffcc00');
-                        p.vx = (Math.random() - 0.5) * 5;
-                        p.vy = (Math.random() - 0.5) * 5;
-                        game.particles.push(p);
-                    }
-                    if (isBoss) {
-                        enemy.hp = Math.max(0, enemy.hp - 5);
-                        if (enemy.hp <= 0) enemy.dying = true;
-                    } else {
-                        enemy.dying = true;
-                    }
-                } else {
-                    const angle  = Math.atan2(enemy.y - this.y, enemy.x - this.x);
-                    const factor = 1 - dist / REPEL_RADIUS;
-                    enemy.knockbackVx = Math.cos(angle) * 15 * factor;
-                    enemy.knockbackVy = Math.sin(angle) * 15 * factor;
-                    enemy.stunFrames  = REPEL_STUN_FRAMES;
-                    // Repel also chips boss HP
-                    if (isBoss) {
-                        enemy.hp = Math.max(0, enemy.hp - 2);
-                        if (enemy.hp <= 0) enemy.dying = true;
-                    }
-                }
             }
         }
     }
@@ -617,48 +597,13 @@ class Player {
                 if (this.comboCount >= COMBO_STREAK_MIN && !this.streakActive) {
                     this.streakActive = true;
                 }
+                game.embers += EMBERS_PER_PURIFY;
+                game._onPilePurified();
                 game.shadowPiles.splice(i, 1);
             }
         }
 
         game.floatingTexts.push(new FloatingText(this.x, this.y - 65, 'LUMEN NOVA!', '#ffffff', 18));
-    }
-
-    /**
-     * Lumen Dash — blink 120 px toward the cursor over 4 frames.
-     *
-     * Direction is captured once at call-time from `game.mouseX/Y` and stored as
-     * fixed `dashVx`/`dashVy` scalars. Subsequent mouse movement has no effect
-     * until the dash completes, preventing mid-dash curve artefacts.
-     *
-     * A ghost copy is seeded at the departure point here; four additional ghosts
-     * are deposited in {@link update} at post-move positions during the dash frames.
-     *
-     * Cooldown: {@link DASH_COOLDOWN} frames (3 s). Visualised as a charging arc
-     * around the player sprite in {@link drawSprite}.
-     *
-     * @param {Game} game - Live game reference for mouse position and audio.
-     */
-    triggerDash(game) {
-        if (this.dashTimer < DASH_COOLDOWN) return;
-
-        const dx  = game.mouseX - this.x;
-        const dy  = game.mouseY - this.y;
-        const len = Math.hypot(dx, dy);
-        if (len < 1) return;   // cursor on top of player — no direction
-
-        this.dashTimer  = 0;
-        const nx        = dx / len;
-        const ny        = dy / len;
-        this.dashVx     = nx * (DASH_DISTANCE / DASH_FRAMES);
-        this.dashVy     = ny * (DASH_DISTANCE / DASH_FRAMES);
-        this.dashFrames = DASH_FRAMES;
-        this.dashActive = true;
-
-        // Seed ghost at origin before the movement begins
-        this.dashGhosts.push({ x: this.x, y: this.y, life: DASH_GHOST_LIFE });
-
-        game.audio.playSoundEffect('dash_zip');
     }
 
     // Draws fading cyan circles for the last TRAIL_LENGTH positions.
@@ -706,6 +651,24 @@ class Player {
         ctx.fill();
         ctx.restore();
 
+        // ── Layer 1.5: Contrast ring + hot core for readability ──────────────
+        const ringPulse = 0.8 + 0.2 * Math.abs(Math.sin(this.orbitAngle * 2.5));
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius * PLAYER_CONTRAST_RING_RADIUS, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(230, 255, 255, ${0.5 + ringPulse * 0.25})`;
+        ctx.lineWidth = 1.35;
+        ctx.shadowColor = '#9af6ff';
+        ctx.shadowBlur = 10;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius * 0.7, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 255, 240, 0.92)';
+        ctx.fill();
+        ctx.restore();
+
         // ── Layer 2: Sprite body OR procedural fallback ──────────────────────
         if (this.img && this.img.complete && this.img.naturalWidth > 0) {
             // PNG sprite — sized to encompass the orbital ring area
@@ -737,74 +700,9 @@ class Player {
         ctx.stroke();
 
         ctx.restore();
-
-        // ── Layer 4: Dash cooldown arc — charges clockwise from 12 o'clock ───
-        const dashFrac  = Math.min(1, this.dashTimer / DASH_COOLDOWN);
-        const dashReady = dashFrac >= 1;
-        const arcR      = this.radius * 3.2;
-
-        ctx.save();
-        ctx.translate(this.x, this.y);
-
-        // Dim track ring
-        ctx.beginPath();
-        ctx.arc(0, 0, arcR, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(0, 60, 70, 0.35)';
-        ctx.lineWidth   = 1.5;
-        ctx.stroke();
-
-        // Fill arc
-        if (dashFrac > 0) {
-            const start = -Math.PI / 2;
-            const end   = start + Math.PI * 2 * dashFrac;
-            ctx.beginPath();
-            ctx.arc(0, 0, arcR, start, end);
-            if (dashReady) {
-                ctx.strokeStyle = '#ffffff';
-                ctx.lineWidth   = 2;
-                ctx.shadowColor = '#00ffff';
-                ctx.shadowBlur  = 14;
-            } else {
-                ctx.strokeStyle = '#00cccc';
-                ctx.lineWidth   = 1.5;
-                ctx.shadowColor = '#00ffff';
-                ctx.shadowBlur  = 5;
-            }
-            ctx.stroke();
-            ctx.shadowBlur = 0;
-        }
-
-        ctx.restore();
     }
 
     draw(ctx) {
-        // ── Ghost trail — semi-transparent copies fading along the dash path ──
-        for (const ghost of this.dashGhosts) {
-            const t = ghost.life / DASH_GHOST_LIFE;  // 1 (new) → 0 (faded)
-            ctx.save();
-            ctx.globalAlpha = t * 0.48;
-            // Outer soft halo
-            ctx.globalCompositeOperation = 'screen';
-            const glowR = this.radius * 4;
-            const glow  = ctx.createRadialGradient(ghost.x, ghost.y, 0, ghost.x, ghost.y, glowR);
-            glow.addColorStop(0,   'rgba(0, 220, 255, 0.55)');
-            glow.addColorStop(0.4, 'rgba(0, 100, 200, 0.15)');
-            glow.addColorStop(1,   'rgba(0, 0, 0, 0)');
-            ctx.fillStyle = glow;
-            ctx.beginPath();
-            ctx.arc(ghost.x, ghost.y, glowR, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.globalCompositeOperation = 'source-over';
-            // Core disc
-            ctx.beginPath();
-            ctx.arc(ghost.x, ghost.y, this.radius * (0.5 + t * 0.7), 0, Math.PI * 2);
-            ctx.fillStyle   = '#00ffff';
-            ctx.shadowColor = '#00ffff';
-            ctx.shadowBlur  = 18 * t;
-            ctx.fill();
-            ctx.shadowBlur  = 0;
-            ctx.restore();
-        }
         this.drawSprite(ctx);
     }
 
@@ -858,12 +756,14 @@ class Hero {
         this.ghostHp += (this.hp - this.ghostHp) * GHOST_DRAIN_SPEED;
 
         let nearest     = null;
-        let nearestDist = Infinity;
+        let nearestDistSq = Infinity;
 
         for (const enemy of enemies) {
             if (enemy.dying) continue; // ignore dissolving enemies as targets
-            const dist = Math.hypot(this.x - enemy.x, this.y - enemy.y);
-            if (dist < nearestDist) { nearestDist = dist; nearest = enemy; }
+            const dx = this.x - enemy.x;
+            const dy = this.y - enemy.y;
+            const distSq = dx * dx + dy * dy;
+            if (distSq < nearestDistSq) { nearestDistSq = distSq; nearest = enemy; }
         }
 
         if (!nearest) {
@@ -874,7 +774,7 @@ class Hero {
 
         this.state = 'chasing';
 
-        if (nearestDist > HERO_ATTACK_RANGE) {
+        if (nearestDistSq > HERO_ATTACK_RANGE * HERO_ATTACK_RANGE) {
             const angle = Math.atan2(nearest.y - this.y, nearest.x - this.x);
             this.x += Math.cos(angle) * this.speed;
             this.y += Math.sin(angle) * this.speed;
@@ -1013,26 +913,29 @@ class Hero {
 // 'Shadow Wraith' — flickering tendrils, dark form, red pulsing core.
 
 class Enemy {
-    constructor(x, y, speed = ENEMY_BASE_SPEED, maxHp = ENEMY_MAX_HP) {
+    constructor(x, y, speed = ENEMY_BASE_SPEED, maxHp = ENEMY_MAX_HP, role = 'wraith') {
         this.x            = x;
         this.y            = y;
-        this.radius       = 12;
+        this.radius       = role === 'warden' ? 16 : 12;
         this.speed        = speed;
-        this.maxHp        = maxHp;
-        this.hp           = maxHp;
+        this.role         = role;
+        this.maxHp        = role === 'warden' ? maxHp + 3 : role === 'harrier' ? Math.max(1, maxHp - 1) : maxHp;
+        this.hp           = this.maxHp;
         this.dead         = false;
         this.dying        = false;         // true = dissolve animation running
         this.dyingFrames  = 0;
         this.alpha        = 1;
         this.age          = 0;             // frame counter for flicker animation
         this.flickerPhase = Math.random() * Math.PI * 2; // per-enemy random phase
-        this.stunFrames   = 0;             // > 0 = stunned after Repel
+        this.stunFrames   = 0;             // > 0 = stunned (trap / ability CC)
         this.knockbackVx  = 0;
         this.knockbackVy  = 0;
+        this.attackTimer  = 0;
+        this.auraTimer    = 0;
         // this.img resolved via Enemy.prototype.img after asset load
     }
 
-    update(hero) {
+    update(hero, game) {
         this.age++;
 
         // ── Death dissolve (shrink + fade over ENEMY_DISSOLVE_FRAMES) ─────────
@@ -1053,13 +956,62 @@ class Enemy {
             return;
         }
 
-        // ── Normal movement toward Hero ───────────────────────────────────────
-        const angle = Math.atan2(hero.y - this.y, hero.x - this.x);
-        this.x += Math.cos(angle) * this.speed;
-        this.y += Math.sin(angle) * this.speed;
+        const towardHero = Math.atan2(hero.y - this.y, hero.x - this.x);
+        const towardPlayer = Math.atan2(game.player.y - this.y, game.player.x - this.x);
 
-        if (Math.hypot(this.x - hero.x, this.y - hero.y) < this.radius + hero.radius) {
-            hero.hp -= 0.08 * (1 - hero.damageResist);
+        if (this.role === 'harrier') {
+            this.x += Math.cos(towardPlayer) * this.speed * 1.35;
+            this.y += Math.sin(towardPlayer) * this.speed * 1.35;
+            const pdx = this.x - game.player.x;
+            const pdy = this.y - game.player.y;
+            const pRange = this.radius + game.player.radius + 4;
+            if ((pdx * pdx + pdy * pdy) < pRange * pRange) {
+                game.player.corruptionDrain = Math.min(CORRUPTION_MAX_DRAIN, game.player.corruptionDrain + 10);
+            }
+        } else if (this.role === 'hexer') {
+            const hdx = this.x - hero.x;
+            const hdy = this.y - hero.y;
+            const distHeroSq = hdx * hdx + hdy * hdy;
+            if (distHeroSq < 160 * 160) {
+                this.x -= Math.cos(towardHero) * this.speed * 0.75;
+                this.y -= Math.sin(towardHero) * this.speed * 0.75;
+            } else if (distHeroSq > 260 * 260) {
+                this.x += Math.cos(towardHero) * this.speed * 0.55;
+                this.y += Math.sin(towardHero) * this.speed * 0.55;
+            }
+            this.attackTimer++;
+            if (this.attackTimer >= HEXER_ATTACK_FRAMES) {
+                this.attackTimer = 0;
+                game.shadowBolts.push(new ShadowBolt(this.x, this.y, hero.x, hero.y));
+            }
+        } else {
+            this.x += Math.cos(towardHero) * this.speed;
+            this.y += Math.sin(towardHero) * this.speed;
+        }
+
+        if (this.role === 'warden') {
+            this.auraTimer++;
+            if (this.auraTimer >= 30) {
+                this.auraTimer = 0;
+                for (const e of game.enemies) {
+                    if (e === this || e.dying || e instanceof WraithPrime) continue;
+                    const dx = e.x - this.x;
+                    const dy = e.y - this.y;
+                    if ((dx * dx + dy * dy) < 120 * 120) {
+                        e.knockbackVx *= 0.85;
+                        e.knockbackVy *= 0.85;
+                        e.stunFrames = Math.max(0, e.stunFrames - 8);
+                    }
+                }
+            }
+        }
+
+        const hitMul = this.role === 'warden' ? 1.3 : this.role === 'harrier' ? 0.75 : 1;
+        const hx = this.x - hero.x;
+        const hy = this.y - hero.y;
+        const hr = this.radius + hero.radius;
+        if ((hx * hx + hy * hy) < hr * hr) {
+            hero.hp -= 0.08 * hitMul * (1 - hero.damageResist);
         }
     }
 
@@ -1097,6 +1049,7 @@ class Enemy {
             // HP pips and stun ring (same helpers as procedural path)
             this._drawPips(ctx);
             this._drawStunRing(ctx);
+            this._drawRoleMark(ctx);
         } else {
             this._drawProcedural(ctx);
         }
@@ -1146,6 +1099,7 @@ class Enemy {
 
         this._drawPips(ctx);
         this._drawStunRing(ctx);
+        this._drawRoleMark(ctx);
     }
 
     _drawPips(ctx) {
@@ -1175,6 +1129,22 @@ class Enemy {
         ctx.shadowBlur  = 10;
         ctx.stroke();
         ctx.shadowBlur  = 0;
+        ctx.restore();
+    }
+
+    _drawRoleMark(ctx) {
+        if (this.role === 'wraith' || this.dying) return;
+        const mark = this.role === 'harrier' ? 'FAST' : this.role === 'hexer' ? 'HEX' : 'TANK';
+        const color = this.role === 'harrier' ? '#ff8a8a' : this.role === 'hexer' ? '#ff77ff' : '#a8c8ff';
+        ctx.save();
+        ctx.font = 'bold 9px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = color;
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 6;
+        ctx.fillText(mark, this.x, this.y - this.radius - 18);
+        ctx.shadowBlur = 0;
         ctx.restore();
     }
 }
@@ -1256,7 +1226,7 @@ class HealOrb {
         this.y += (hero.y - this.y) * HEAL_ORB_LERP;
 
         const speed = Math.hypot(this.x - prevX, this.y - prevY);
-        if (speed > 0.4) {
+        if (speed > 0.4 && game.particles.length < PARTICLE_SOFT_CAP) {
             const count = speed > 2 ? 2 : 1;
             for (let i = 0; i < count; i++) {
                 game.particles.push(new Particle(this.x, this.y, '#4cff91'));
@@ -1436,6 +1406,315 @@ class CorruptionParticle {
         ctx.fill();
         ctx.shadowBlur  = 0;
 
+        ctx.restore();
+    }
+}
+
+// ─── ShadowBolt ────────────────────────────────────────────────────────────────
+// Projectile fired by Hexer-type enemies. Applies direct Hero damage pressure.
+
+class ShadowBolt {
+    constructor(x, y, tx, ty) {
+        const dx = tx - x;
+        const dy = ty - y;
+        const len = Math.max(1, Math.hypot(dx, dy));
+        this.x = x;
+        this.y = y;
+        this.vx = (dx / len) * BOLT_SPEED;
+        this.vy = (dy / len) * BOLT_SPEED;
+        this.life = 220;
+        this.dead = false;
+    }
+
+    update(hero, game) {
+        if (this.dead) return;
+        this.x += this.vx;
+        this.y += this.vy;
+        this.life--;
+
+        if (Math.hypot(this.x - hero.x, this.y - hero.y) < hero.radius + BOLT_HIT_RADIUS) {
+            hero.hp -= 6 * (1 - hero.damageResist);
+            this.dead = true;
+            game.triggerShake(2, 6);
+            return;
+        }
+
+        if (this.life <= 0 ||
+            this.x < -30 || this.y < -30 ||
+            this.x > game.canvas.width + 30 || this.y > game.canvas.height + 30) {
+            this.dead = true;
+        }
+    }
+
+    draw(ctx) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#bb55ff';
+        ctx.shadowColor = '#dd99ff';
+        ctx.shadowBlur = 14;
+        ctx.fill();
+        ctx.restore();
+    }
+}
+
+// ─── LightBeacon ───────────────────────────────────────────────────────────────
+// Interactive world beacon: hold near to activate temporary sanctuary aura.
+
+class LightBeacon {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.radius = BEACON_RADIUS;
+        this.capture = 0;
+        this.activeTimer = 0;
+        this.playerInside = false;
+    }
+
+    get active() { return this.activeTimer > 0; }
+
+    update(player, hero, game) {
+        const pdx = player.x - this.x;
+        const pdy = player.y - this.y;
+        const playerNear = (pdx * pdx + pdy * pdy) < (this.radius * 0.65) * (this.radius * 0.65);
+        if (!this.active) {
+            if (playerNear) this.capture++;
+            else this.capture = Math.max(0, this.capture - 2);
+            if (this.capture >= BEACON_ACTIVATE_FRAMES) {
+                this.capture = 0;
+                this.activeTimer = BEACON_ACTIVE_FRAMES;
+                game.floatingTexts.push(new FloatingText(this.x, this.y - 26, 'BEACON LIT', '#7ecfff', 12));
+            }
+            this.playerInside = false;
+        } else {
+            this.activeTimer--;
+            const hdx = hero.x - this.x;
+            const hdy = hero.y - this.y;
+            if ((hdx * hdx + hdy * hdy) < this.radius * this.radius) {
+                hero.hp = Math.min(hero.maxHp, hero.hp + 0.03);
+            }
+
+            const sanctuaryR = this.radius * 0.9;
+            const inSanctuary = (pdx * pdx + pdy * pdy) < sanctuaryR * sanctuaryR;
+            if (inSanctuary) {
+                player.corruptionDrain = Math.max(0, player.corruptionDrain - BEACON_DRAIN_RECOVERY);
+                player.novaTimer = Math.min(NOVA_COOLDOWN, player.novaTimer + BEACON_NOVA_BONUS);
+                if (!this.playerInside) {
+                    game.floatingTexts.push(new FloatingText(this.x, this.y - 42, 'SANCTUARY CHARGES NOVA', '#e4f7ff', 10));
+                }
+            }
+            this.playerInside = inSanctuary;
+        }
+    }
+
+    draw(ctx, time) {
+        const pulse = 0.8 + 0.2 * Math.abs(Math.sin(time * 0.07 + this.x * 0.01));
+        const activeA = this.active ? 0.45 + pulse * 0.25 : 0.2;
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        const halo = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.radius * 1.25);
+        halo.addColorStop(0, this.active ? 'rgba(180, 240, 255, 0.48)' : 'rgba(120, 200, 255, 0.24)');
+        halo.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = halo;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius * 1.25, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalCompositeOperation = 'source-over';
+
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(50, 180, 255, ${activeA})`;
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius * 0.65, 0, Math.PI * 2);
+        ctx.strokeStyle = this.active ? '#7ecfff' : 'rgba(126, 207, 255, 0.28)';
+        ctx.lineWidth = this.active ? 2 : 1;
+        ctx.stroke();
+
+        if (!this.active && this.capture > 0) {
+            const frac = this.capture / BEACON_ACTIVATE_FRAMES;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius * 0.85, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac);
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+        if (this.active) {
+            ctx.font = 'bold 10px "Courier New", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillStyle = 'rgba(210, 235, 255, 0.85)';
+            ctx.fillText('SANCTUARY', this.x, this.y - this.radius - 12);
+        }
+        ctx.restore();
+    }
+}
+
+// ─── TrapSigil ────────────────────────────────────────────────────────────────
+// Player can prime sigils; primed sigils detonate when enemies pass through.
+
+class TrapSigil {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.primeFrames = 0;
+        this.primed = false;
+        this.dead = false;
+    }
+
+    update(player, enemies, game) {
+        if (this.dead) return;
+        const pdx = player.x - this.x;
+        const pdy = player.y - this.y;
+        const near = (pdx * pdx + pdy * pdy) < 26 * 26;
+        if (!this.primed) {
+            if (near) this.primeFrames++;
+            else this.primeFrames = Math.max(0, this.primeFrames - 2);
+            if (this.primeFrames >= SIGIL_PRIME_FRAMES) {
+                this.primed = true;
+                this.primeFrames = SIGIL_PRIME_FRAMES;
+                game.floatingTexts.push(new FloatingText(this.x, this.y - 20, 'SIGIL PRIMED', '#ffe566', 11));
+            }
+            return;
+        }
+
+        for (const enemy of enemies) {
+            if (enemy.dying) continue;
+            const dx = enemy.x - this.x;
+            const dy = enemy.y - this.y;
+            if ((dx * dx + dy * dy) < SIGIL_TRIGGER_RADIUS * SIGIL_TRIGGER_RADIUS) {
+                if (enemy instanceof WraithPrime) {
+                    enemy.hp = Math.max(0, enemy.hp - 8);
+                    if (enemy.hp <= 0) enemy.dying = true;
+                } else {
+                    enemy.dying = true;
+                }
+                this.dead = true;
+                game.shockWaves.push(new ShockWave(this.x, this.y, 120, '#ffe566'));
+                game.triggerShake(4, 10);
+                game.floatingTexts.push(new FloatingText(this.x, this.y - 28, 'SIGIL BURST', '#ffe566', 13));
+                break;
+            }
+        }
+    }
+
+    draw(ctx, time) {
+        const pulse = 0.65 + 0.35 * Math.abs(Math.sin(time * 0.12));
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.primed ? 42 : 28, 0, Math.PI * 2);
+        ctx.fillStyle = this.primed ? 'rgba(255, 220, 120, 0.30)' : 'rgba(255, 210, 100, 0.16)';
+        ctx.fill();
+        ctx.globalCompositeOperation = 'source-over';
+
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, 18, 0, Math.PI * 2);
+        ctx.strokeStyle = this.primed ? '#ffe566' : 'rgba(255, 229, 102, 0.75)';
+        ctx.lineWidth = this.primed ? 2.6 : 2;
+        ctx.stroke();
+
+        if (!this.primed && this.primeFrames > 0) {
+            const frac = this.primeFrames / SIGIL_PRIME_FRAMES;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, 22, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac);
+            ctx.strokeStyle = '#fff7a1';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        if (this.primed) {
+            ctx.globalAlpha = 0.25 + pulse * 0.3;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, 30, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255, 210, 90, 0.25)';
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            ctx.font = 'bold 10px "Courier New", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillStyle = '#ffe566';
+            ctx.fillText('ARMED', this.x, this.y - 36);
+        }
+        ctx.restore();
+    }
+}
+
+// ─── CorruptionVent ───────────────────────────────────────────────────────────
+// Rift-like vent that periodically emits corruption until sealed by player.
+
+class CorruptionVent {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.sealFrames = 0;
+        this.sealed = false;
+        this.emitTimer = 0;
+    }
+
+    update(player, game) {
+        if (this.sealed) return;
+
+        this.emitTimer++;
+        if (this.emitTimer >= VENT_CORRUPT_INTERVAL) {
+            this.emitTimer = 0;
+            const a = Math.random() * Math.PI * 2;
+            game.corruptionParticles.push(new CorruptionParticle(
+                this.x + Math.cos(a) * (Math.random() * VENT_CORRUPT_RADIUS),
+                this.y + Math.sin(a) * (Math.random() * VENT_CORRUPT_RADIUS)
+            ));
+        }
+
+        const pdx = player.x - this.x;
+        const pdy = player.y - this.y;
+        const near = (pdx * pdx + pdy * pdy) < 28 * 28;
+        if (near) this.sealFrames++;
+        else this.sealFrames = Math.max(0, this.sealFrames - 2);
+
+        if (this.sealFrames >= VENT_SEAL_FRAMES) {
+            this.sealed = true;
+            game.floatingTexts.push(new FloatingText(this.x, this.y - 24, 'RIFT SEALED', '#00ffff', 12));
+            game.embers += 2;
+            if (game.currentObjective && game.currentObjective.type === 'seal') {
+                game.currentObjective.progress++;
+            }
+        }
+    }
+
+    draw(ctx, time) {
+        const pulse = 0.7 + 0.3 * Math.abs(Math.sin(time * 0.1 + this.x * 0.013));
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.sealed ? 26 : 38, 0, Math.PI * 2);
+        ctx.fillStyle = this.sealed ? 'rgba(90, 220, 255, 0.20)' : `rgba(210, 110, 255, ${0.18 + pulse * 0.18})`;
+        ctx.fill();
+        ctx.globalCompositeOperation = 'source-over';
+
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, 20, 0, Math.PI * 2);
+        ctx.fillStyle = this.sealed ? 'rgba(0, 200, 255, 0.25)' : `rgba(130, 20, 180, ${0.35 + pulse * 0.2})`;
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, 24, 0, Math.PI * 2);
+        ctx.strokeStyle = this.sealed ? 'rgba(0, 255, 255, 0.95)' : 'rgba(232, 150, 255, 0.85)';
+        ctx.lineWidth = 2.4;
+        ctx.stroke();
+
+        if (!this.sealed && this.sealFrames > 0) {
+            const frac = this.sealFrames / VENT_SEAL_FRAMES;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, 29, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac);
+            ctx.strokeStyle = '#00ffff';
+            ctx.lineWidth = 2.2;
+            ctx.stroke();
+        }
+        if (!this.sealed) {
+            ctx.font = 'bold 10px "Courier New", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillStyle = 'rgba(232, 150, 255, 0.9)';
+            ctx.fillText('RIFT', this.x, this.y - 30);
+        }
         ctx.restore();
     }
 }
@@ -1813,7 +2092,6 @@ class AudioManager {
             case 'corpse_collect': this._sfxCorpse(ctx);                     break;
             case 'nova_blast':     this._sfxNova(ctx);                       break;
             case 'combo_ping':     this._sfxComboPing(ctx, data.combo ?? 1); break;
-            case 'dash_zip':       this._sfxDash(ctx);                       break;
             case 'bass_hum':       this._sfxBassHum(ctx);                    break;
         }
     }
@@ -1951,40 +2229,6 @@ class AudioManager {
         osc.stop(now + 0.2);
     }
 
-    // Short high-pitched 'zip' chirp for Lumen Dash.
-    // Sine sweep: 1400 Hz → 2800 Hz → 900 Hz over 120ms.
-    // High-pass at 800 Hz strips the low-mid body, leaving a bright,
-    // airy 'whoosh' that reads as fast displacement without masking gameplay SFX.
-    _sfxDash(ctx) {
-        const now = ctx.currentTime;
-        const osc = ctx.createOscillator();
-        const env = ctx.createGain();
-        const hpf = ctx.createBiquadFilter();
-        const out = ctx.createGain();
-
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(1400, now);
-        osc.frequency.exponentialRampToValueAtTime(2800, now + 0.05);
-        osc.frequency.exponentialRampToValueAtTime(900,  now + 0.12);
-
-        env.gain.setValueAtTime(0.5, now);
-        env.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
-
-        hpf.type            = 'highpass';
-        hpf.frequency.value = 800;
-        hpf.Q.value         = 2.0;
-
-        out.gain.value = 0.38;
-
-        osc.connect(env);
-        env.connect(hpf);
-        hpf.connect(out);
-        out.connect(ctx.destination);
-
-        osc.start(now);
-        osc.stop(now + 0.15);
-    }
-
     // Deep sub-bass rumble (60 Hz → 45 Hz), 800 ms duration.
     // Triggered on first hover of the 'Stay in the Shadows' milestone button.
     // Frequency descent mimics gravitational weight — the world pulling the player back.
@@ -2022,47 +2266,83 @@ class Store {
         this.overlay = document.createElement('div');
         this.overlay.id = 'store-overlay';
         document.body.appendChild(this.overlay);
+        this.currentWave = 1;
+        this.currentCards = [];
     }
 
     open(wave) {
-        const pool   = [...UPGRADE_DEFS];
-        const chosen = [];
-        for (let i = 0; i < 3; i++) {
-            const idx = Math.floor(Math.random() * pool.length);
-            chosen.push(pool.splice(idx, 1)[0]);
-        }
-
-        this.overlay.innerHTML = `
-            <div class="store-panel">
-                <div class="store-header">
-                    <h2>WAVE&nbsp;${wave}&nbsp;COMPLETE</h2>
-                    <p>Select an upgrade</p>
-                </div>
-                <div class="store-cards">
-                    ${chosen.map(u => `
-                        <div class="store-card" data-id="${u.id}" style="--card-color:${u.color}">
-                            <span class="card-icon">${u.icon}</span>
-                            <div class="card-name">${u.name}</div>
-                            <div class="card-stat">${u.stat}</div>
-                            <div class="card-lore">${u.lore}</div>
-                            <div class="card-level">LEVEL&nbsp;${this.game.upgrades[u.id] + 1}</div>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        `;
-
-        this.overlay.querySelectorAll('.store-card').forEach(card => {
-            card.addEventListener('click', () => this._select(card.dataset.id));
-        });
-
+        this.currentWave = wave;
+        this._rollCards();
         this.overlay.style.display = 'flex';
     }
 
     hide() { this.overlay.style.display = 'none'; }
 
-    _select(id) {
-        this._applyUpgrade(id);
+    _rollCards() {
+        const pool = [...UPGRADE_DEFS];
+        const chosen = [];
+        for (let i = 0; i < 3 && pool.length > 0; i++) {
+            const idx = Math.floor(Math.random() * pool.length);
+            chosen.push(pool.splice(idx, 1)[0]);
+        }
+
+        if (this.game.objectiveRelics > 0 && !this.game.relicPath) {
+            for (const relic of RELIC_PATH_DEFS) chosen.push({ ...relic, kind: 'relic' });
+        }
+
+        this.currentCards = chosen;
+        this._render();
+    }
+
+    _render() {
+        const relicNote = this.game.objectiveRelics > 0 && !this.game.relicPath
+            ? `<p>Objective reward unlocked: choose one Oath path</p>`
+            : `<p>Select an upgrade</p>`;
+
+        this.overlay.innerHTML = `
+            <div class="store-panel">
+                <div class="store-header">
+                    <h2>WAVE&nbsp;${this.currentWave}&nbsp;COMPLETE</h2>
+                    ${relicNote}
+                    <p>Embers: ${this.game.embers}</p>
+                </div>
+                <div class="store-cards">
+                    ${this.currentCards.map(u => `
+                        <div class="store-card" data-id="${u.id}" data-kind="${u.kind || 'upgrade'}" style="--card-color:${u.color}">
+                            <span class="card-icon">${u.icon}</span>
+                            <div class="card-name">${u.name}</div>
+                            <div class="card-stat">${u.stat}</div>
+                            <div class="card-lore">${u.lore}</div>
+                            <div class="card-level">${
+                                (u.kind || 'upgrade') === 'upgrade'
+                                    ? `LEVEL&nbsp;${(this.game.upgrades[u.id] || 0) + 1}`
+                                    : 'PATH&nbsp;UNLOCK'
+                            }</div>
+                        </div>
+                    `).join('')}
+                </div>
+                <button class="pause-btn" id="btn-store-reroll">REROLL · ${STORE_REROLL_COST} EMBERS</button>
+            </div>
+        `;
+
+        this.overlay.querySelectorAll('.store-card').forEach(card => {
+            card.addEventListener('click', () => this._select(card.dataset.id, card.dataset.kind));
+        });
+
+        const rerollBtn = this.overlay.querySelector('#btn-store-reroll');
+        if (rerollBtn) {
+            if (this.game.embers < STORE_REROLL_COST) rerollBtn.disabled = true;
+            rerollBtn.addEventListener('click', () => {
+                if (this.game.embers < STORE_REROLL_COST) return;
+                this.game.embers -= STORE_REROLL_COST;
+                this._rollCards();
+            });
+        }
+    }
+
+    _select(id, kind = 'upgrade') {
+        if (kind === 'relic') this._applyRelicPath(id);
+        else this._applyUpgrade(id);
         this.hide();
         this.game._resumeFromStore();
     }
@@ -2077,6 +2357,28 @@ class Store {
             case 'healing': this.game.healValue = Math.round(this.game.healValue * 1.2);                      break;
         }
     }
+
+    _applyRelicPath(id) {
+        if (this.game.relicPath || this.game.objectiveRelics <= 0) return;
+        this.game.relicPath = id;
+        this.game.objectiveRelics--;
+        if (id === 'purifierPath') {
+            this.game.cleanFrames = Math.max(20, Math.round(this.game.cleanFrames - 12));
+            this.game.player.lightRadius *= 1.15;
+        } else if (id === 'guardianPath') {
+            this.game.hero.damageResist = Math.min(0.85, this.game.hero.damageResist + 0.2);
+            this.game.hero.hp = Math.min(this.game.hero.maxHp, this.game.hero.hp + 25);
+        } else if (id === 'tempestPath') {
+            this.game.player.novaTimer = Math.min(NOVA_COOLDOWN, this.game.player.novaTimer + 180);
+        }
+        this.game.floatingTexts.push(new FloatingText(
+            this.game.canvas.width / 2,
+            this.game.canvas.height / 2 - 40,
+            'OATH FORGED',
+            '#ffffff',
+            18
+        ));
+    }
 }
 
 // ─── Game ─────────────────────────────────────────────────────────────────────
@@ -2088,6 +2390,11 @@ class Game {
 
         this.lightCanvas = document.createElement('canvas');
         this.lightCtx    = this.lightCanvas.getContext('2d');
+        this.darknessCanvas = document.createElement('canvas');
+        this.darknessCtx    = this.darknessCanvas.getContext('2d');
+        this.minimapCacheCanvas = document.createElement('canvas');
+        this.minimapCacheCtx = this.minimapCacheCanvas.getContext('2d');
+        this.minimapTick = 0;
 
         this.resize();
         window.addEventListener('resize', () => this.resize());
@@ -2095,8 +2402,9 @@ class Game {
         this.mouseX = this.canvas.width  / 2;
         this.mouseY = this.canvas.height / 2;
         this.canvas.addEventListener('mousemove', e => {
-            this.mouseX = e.clientX;
-            this.mouseY = e.clientY;
+            const rect = this.canvas.getBoundingClientRect();
+            this.mouseX = e.clientX - rect.left;
+            this.mouseY = e.clientY - rect.top;
         });
 
         window.addEventListener('keydown', e => {
@@ -2119,36 +2427,28 @@ class Game {
                 e.preventDefault();
                 if (this.gameState === 'menu') {
                     this._startGame();
-                } else if (this.gameState === 'playing' && this.player.repelTimer >= REPEL_COOLDOWN) {
-                    this.player.triggerRepel(this);
+                } else if (this.gameState === 'tutorial') {
+                    this._advanceTutorial();
                 }
             }
             if ((e.key === 'f' || e.key === 'F') && this.gameState === 'playing') {
                 this.player.triggerNova(this);
             }
-        });
-
-        // Dedicated Shift → Lumen Dash listener, separate from the combined handler
-        // to guarantee input priority.  e.shiftKey is used (layout-independent check);
-        // e.key === 'Shift' narrows the event to the actual Shift keydown only, so
-        // Shift+F does not accidentally fire both Nova and Dash simultaneously.
-        window.addEventListener('keydown', e => {
-            if (e.shiftKey && e.key === 'Shift' && this.gameState === 'playing') {
+            if ((e.key === 'Enter') && this.gameState === 'tutorial') {
                 e.preventDefault();
-                this.player.triggerDash(this);
+                this._advanceTutorial();
             }
         });
 
-        // Left-click triggers Nova; right-click triggers Lumen Dash.
-        // e.preventDefault() in the contextmenu handler suppresses the browser's
-        // native right-click menu, which would otherwise steal focus and freeze input.
+        // Left-click triggers Nova. Right-click is suppressed to keep focus in-game.
         this.canvas.addEventListener('click', () => {
             if      (this.gameState === 'playing')   this.player.triggerNova(this);
             else if (this.gameState === 'milestone')  this._checkMilestoneClick();
+            else if (this.gameState === 'menu')       this._checkMenuClick();
+            else if (this.gameState === 'tutorial')   this._advanceTutorial();
         });
         this.canvas.addEventListener('contextmenu', e => {
             e.preventDefault();
-            if (this.gameState === 'playing') this.player.triggerDash(this);
         });
 
         this._loadAssets();
@@ -2158,6 +2458,11 @@ class Game {
         this.audio     = new AudioManager('./assets/audio/bg_music.mp3', './assets/audio/boss_music.mp3');
         this.time      = 0;
         this.gameState = 'menu';    // Start on the main menu before Wave 1
+        this.bestCache = _loadBest();
+        this.cachedDarknessAlpha = -1;
+        this.menuHover = null;
+        this.tutorialStep = 0;
+        this.tutorialTimer = 0;
 
         this.loop();
     }
@@ -2220,8 +2525,13 @@ class Game {
         this.shockWaves    = [];
         this.ambientPulses = [];
         this.floatingTexts = [];
+        this.shadowBolts   = [];
+        this.beacons       = [];
+        this.trapSigils    = [];
+        this.corruptionVents = [];
 
         this.score              = 0;
+        this.embers             = 0;
         this.wave               = 1;
         this.waveTimer          = 0;
         this.spawnTimer         = 0;
@@ -2231,6 +2541,13 @@ class Game {
         this.cleanFrames        = SHADOW_CLEAN_FRAMES;
         this.healValue          = HEAL_ORB_VALUE;
         this.upgrades           = { lumen: 0, purge: 0, armor: 0, healing: 0 };
+        this.relicPath          = null;
+        this.objectiveRelics    = 0;
+        this.currentObjective   = null;
+        this.objectiveCycle     = 0;
+        this.loreFragments      = 0;
+        this.loreLine           = '';
+        this.loreTimer          = 0;
 
         this.shakeFrames    = 0;
         this.shakeIntensity = 0;
@@ -2246,6 +2563,7 @@ class Game {
         this.bossUIAlpha         = 0;    // drives boss health bar fade-in / fade-out
 
         this.gameOverTimer   = 0;        // frames elapsed in 'gameover' state (drives desaturation fade)
+        this.cachedDarknessAlpha = -1;
 
         // ── Endless Scaling ───────────────────────────────────────────────────
         this.taintAlpha   = 0;             // darkness accumulator: +5% per 'Continue' milestone
@@ -2260,6 +2578,7 @@ class Game {
 
     restart() {
         this._initEntities();
+        this._assignObjective();
         this.store.hide();
         // Reset any running boss music crossfade before restoring the BGM.
         this.audio.resetBossMusic();
@@ -2313,6 +2632,9 @@ class Game {
         this.pauseOverlay.style.display = 'none';
         this.audio.stop();
         this.gameState = 'menu';
+        this.menuHover = null;
+        this.tutorialStep = 0;
+        this.tutorialTimer = 0;
     }
 
     // Delegates to AudioManager; the HUD icon re-reads audio.muted each frame.
@@ -2320,11 +2642,94 @@ class Game {
         this.audio.toggleMute();
     }
 
+    _refreshBestCache() {
+        this.bestCache = _loadBest();
+    }
+
+    _getMenuRects() {
+        const cw = this.canvas.width;
+        const ch = this.canvas.height;
+        const btnW = 240;
+        const btnH = 54;
+        const gap = 22;
+        const totalW = btnW * 2 + gap;
+        const startX = cw / 2 - totalW / 2;
+        const y = ch * 0.83 - btnH / 2;
+        return {
+            playRect: { x: startX, y, w: btnW, h: btnH },
+            tutorialRect: { x: startX + btnW + gap, y, w: btnW, h: btnH },
+        };
+    }
+
+    _isPointInRect(px, py, rect) {
+        return px >= rect.x && px <= rect.x + rect.w && py >= rect.y && py <= rect.y + rect.h;
+    }
+
+    _updateMenuHover() {
+        const { playRect, tutorialRect } = this._getMenuRects();
+        if (this._isPointInRect(this.mouseX, this.mouseY, playRect)) this.menuHover = 'play';
+        else if (this._isPointInRect(this.mouseX, this.mouseY, tutorialRect)) this.menuHover = 'tutorial';
+        else this.menuHover = null;
+    }
+
+    _checkMenuClick() {
+        const { playRect, tutorialRect } = this._getMenuRects();
+        if (this._isPointInRect(this.mouseX, this.mouseY, playRect)) {
+            this._startGame();
+        } else if (this._isPointInRect(this.mouseX, this.mouseY, tutorialRect)) {
+            this._startTutorial();
+        }
+    }
+
+    _startTutorial() {
+        this.gameState = 'tutorial';
+        this.tutorialStep = 0;
+        this.tutorialTimer = 0;
+    }
+
+    _advanceTutorial() {
+        if (this.gameState !== 'tutorial') return;
+        const last = TUTORIAL_STEPS.length - 1;
+        if (this.tutorialStep < last) {
+            this.tutorialStep++;
+            this.tutorialTimer = 0;
+            return;
+        }
+        // Let players skip the final auto-return wait with input.
+        this._finishTutorial();
+    }
+
+    _finishTutorial() {
+        this.gameState = 'menu';
+        this.tutorialStep = 0;
+        this.tutorialTimer = 0;
+        this.menuHover = null;
+    }
+
     resize() {
-        this.canvas.width       = window.innerWidth;
-        this.canvas.height      = window.innerHeight;
-        this.lightCanvas.width  = window.innerWidth;
-        this.lightCanvas.height = window.innerHeight;
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+
+        this.canvas.style.width = `${w}px`;
+        this.canvas.style.height = `${h}px`;
+        this.canvas.width = w;
+        this.canvas.height = h;
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+        this.lightCanvas.width = w;
+        this.lightCanvas.height = h;
+        this.lightCtx.setTransform(1, 0, 0, 1, 0, 0);
+
+        this.darknessCanvas.width = w;
+        this.darknessCanvas.height = h;
+        this.darknessCtx.setTransform(1, 0, 0, 1, 0, 0);
+        this.cachedDarknessAlpha = -1;
+
+        const mmSize = (MINIMAP_RADIUS * 2) + 8;
+        this.minimapCacheCanvas.width = mmSize;
+        this.minimapCacheCanvas.height = mmSize;
+        this.minimapCacheCtx.setTransform(1, 0, 0, 1, 0, 0);
+        this.minimapTick = 0;
     }
 
     spawnEnemy() {
@@ -2333,7 +2738,8 @@ class Game {
         // Burst pulse: spawn 2 when sparse, but guard with a 3s cooldown so a
         // Nova clear doesn't immediately flood the screen with a double-surge.
         const isSparse = this.enemies.length < Math.floor(ENEMY_MAX_COUNT / 2);
-        const count    = (isSparse && this.burstCooldown <= 0) ? 2 : 1;
+        const canBurst = this.wave >= 3;
+        const count    = (canBurst && isSparse && this.burstCooldown <= 0) ? 2 : 1;
         if (count === 2) this.burstCooldown = BURST_COOLDOWN_FRAMES;
 
         for (let s = 0; s < count && this.enemies.length < ENEMY_MAX_COUNT; s++) {
@@ -2347,8 +2753,51 @@ class Game {
             else if (edge === 2) { x = Math.random() * w; y = h + 20; }
             else                 { x = -20;                y = Math.random() * h; }
 
-            this.enemies.push(new Enemy(x, y, this.currentEnemySpeed, this.enemyMaxHp));
+            const roles = [{ role: 'wraith', weight: 0.85 }];
+            if (this.wave >= 4) roles.push({ role: 'harrier', weight: 0.5 });
+            if (this.wave >= 6) roles.push({ role: 'hexer', weight: 0.4 });
+            if (this.wave >= 8) roles.push({ role: 'warden', weight: 0.3 });
+
+            const total = roles.reduce((sum, r) => sum + r.weight, 0);
+            let pick = Math.random() * total;
+            let chosen = 'wraith';
+            for (const r of roles) {
+                pick -= r.weight;
+                if (pick <= 0) { chosen = r.role; break; }
+            }
+
+            const roleSpeed = chosen === 'harrier'
+                ? this.currentEnemySpeed * 1.25
+                : chosen === 'warden'
+                    ? this.currentEnemySpeed * 0.72
+                    : this.currentEnemySpeed;
+            this.enemies.push(new Enemy(x, y, roleSpeed, this.enemyMaxHp, chosen));
         }
+    }
+
+    _getLevelScalingStep(wave) {
+        if (wave <= 2) return { spawnStep: 6,  speedStep: 0.025 };
+        if (wave <= 4) return { spawnStep: 8,  speedStep: 0.035 };
+        if (wave <= 7) return { spawnStep: 11, speedStep: 0.05 };
+        if (wave <= 10) return { spawnStep: 13, speedStep: 0.065 };
+        return { spawnStep: 15, speedStep: SPEED_PER_WAVE };
+    }
+
+    _applyLevelScaling(wave = this.wave) {
+        const step = this._getLevelScalingStep(wave);
+        this.currentSpawnFrames = Math.max(SPAWN_FRAMES_MIN, this.currentSpawnFrames - step.spawnStep);
+        this.currentEnemySpeed += step.speedStep;
+    }
+
+    _getContinueScalingStep(wave) {
+        if (wave <= 10) return { spawnMult: 0.95, speedBonus: 0.06, hpBonus: 3 };
+        if (wave <= 20) return { spawnMult: 0.93, speedBonus: 0.08, hpBonus: 4 };
+        return { spawnMult: SCALE_SPAWN_MULT, speedBonus: SCALE_SPEED_INC, hpBonus: SCALE_HP_INC };
+    }
+
+    _openStoreForCompletedLevel() {
+        this.gameState = 'store';
+        this.store.open(this.wave);
     }
 
     /**
@@ -2369,19 +2818,34 @@ class Game {
 
         this.waveTimer++;
         if (this.waveTimer >= WAVE_DURATION_FRAMES) {
+            // Mixed objective gating: only milestone waves can hard-gate progression.
+            const isMilestoneWave = this.wave >= OBJECTIVE_GATE_WAVE_START && this.wave % 10 === 0;
+            if (isMilestoneWave && this.currentObjective && this.currentObjective.required &&
+                !this.currentObjective.rewardGiven) {
+                this.waveTimer = WAVE_DURATION_FRAMES - 180;
+                if (this.time % 180 === 0) {
+                    this.floatingTexts.push(new FloatingText(
+                        this.canvas.width / 2,
+                        56,
+                        'MILESTONE OBJECTIVE REQUIRED',
+                        '#ffcc66',
+                        11
+                    ));
+                }
+                return;
+            }
+
             this.waveTimer = 0;
 
             // Wave 5 = warm-up boss; wave 10, 20, 30... = milestone bosses.
-            const isBossWave = this.wave === 5 || (this.wave >= 10 && this.wave % 10 === 0);
+            const isBossWave = this.wave === 5 || isMilestoneWave;
             if (isBossWave) {
                 this._spawnBoss();
                 return;
             }
 
-            this.currentSpawnFrames = Math.max(SPAWN_FRAMES_MIN, this.currentSpawnFrames - 15);
-            this.currentEnemySpeed += SPEED_PER_WAVE;
-            this.gameState = 'store';
-            this.store.open(this.wave);
+            this._applyLevelScaling(this.wave);
+            this._openStoreForCompletedLevel();
         }
     }
 
@@ -2433,16 +2897,17 @@ class Game {
         }
 
         this.floatingTexts.push(new FloatingText(bossX, bossY - 60, 'VANQUISHED', '#ffffff', 18));
+        this._pushLore('Wraith Prime falls; the veil trembles and the old road appears.');
         this.currentBoss = null;
         // Reverse crossfade: boss music fades out, ambient BGM returns over 2s.
         this.audio.endBossMusic();
 
         // Standard per-wave difficulty step applied regardless of milestone branch
-        this.currentSpawnFrames = Math.max(SPAWN_FRAMES_MIN, this.currentSpawnFrames - 15);
-        this.currentEnemySpeed += SPEED_PER_WAVE;
+        this._applyLevelScaling(this.wave);
 
         // Persist the best immediately so any path (Victory/Continue/Quit) is captured
         _saveBest(this.wave, this.score);
+        this._refreshBestCache();
 
         // Waves 10, 20, 30… trigger the Decision Branch milestone screen.
         // The Upgrade Store is NOT opened here on milestone waves — it is deferred
@@ -2451,8 +2916,7 @@ class Game {
         if (this.wave % 10 === 0) {
             this.gameState = 'milestone';
         } else {
-            this.gameState = 'store';
-            this.store.open(this.wave);
+            this._openStoreForCompletedLevel();
         }
     }
 
@@ -2515,17 +2979,19 @@ class Game {
     _chooseMilestone(choice) {
         if (choice === 'ascend') {
             // ASCEND — white-out fade then victory summary
+            this._pushLore('The final gate opens only for those who carried the flame.');
             this.gameState  = 'victory';
             this.victoryTimer = 0;
         } else {
             // CONTINUE — apply Endless Scaling Taint, heal hero, open upgrade store
             this.scaleLevel++;
-            this.currentEnemySpeed  += SCALE_SPEED_INC;
-            this.currentSpawnFrames  = Math.max(
+            const taintStep = this._getContinueScalingStep(this.wave);
+            this.currentEnemySpeed += taintStep.speedBonus;
+            this.currentSpawnFrames = Math.max(
                 SPAWN_FRAMES_MIN,
-                Math.round(this.currentSpawnFrames * SCALE_SPAWN_MULT)
+                Math.round(this.currentSpawnFrames * taintStep.spawnMult)
             );
-            this.enemyMaxHp         += SCALE_HP_INC;
+            this.enemyMaxHp += taintStep.hpBonus;
             this.taintAlpha          = Math.min(0.06, this.taintAlpha + TAINT_ALPHA_INC);
 
             // Partial heal — 50% of Hero's max HP
@@ -2535,16 +3001,132 @@ class Game {
                 this.canvas.width / 2, this.canvas.height / 2 - 60,
                 'THE  DARKNESS  DEEPENS…', '#cc44ff', 16
             ));
+            this._pushLore('The abyss answers: one more cycle, one more oath.');
 
-            this.gameState = 'store';
-            this.store.open(this.wave);
+            this._openStoreForCompletedLevel();
         }
     }
 
     _resumeFromStore() {
         this.wave++;
         this.spawnTimer = 0;
+        if (this.wave >= OBJECTIVE_GATE_WAVE_START && this.wave % 10 === 0) {
+            this._assignObjective();
+            this.currentObjective.required = true;
+        } else if (
+            this.wave >= OBJECTIVE_INTRO_WAVE
+            && this.wave % WAVE_OBJECTIVE_INTERVAL === 0
+        ) {
+            this._assignObjective();
+        } else if (this.currentObjective && this.currentObjective.rewardGiven) {
+            this.currentObjective = null;
+        }
         this.gameState  = 'playing';
+    }
+
+    _assignObjective() {
+        const order = ['purge', 'seal', 'escort'];
+        const type = order[this.objectiveCycle % order.length];
+        this.objectiveCycle++;
+        const required = this.wave >= OBJECTIVE_GATE_WAVE_START && this.wave % 10 === 0;
+        this.currentObjective = {
+            type,
+            progress: 0,
+            target: type === 'escort' ? OBJECTIVE_ESCORT_FRAMES : type === 'seal' ? OBJECTIVE_RIFT_TARGET : OBJECTIVE_PURGE_TARGET,
+            rewardGiven: false,
+            required,
+            hint: type === 'escort'
+                ? 'Activate beacon then hold sanctuary.'
+                : type === 'seal'
+                    ? 'Find and seal all visible vents.'
+                    : 'Purify shadow piles quickly.',
+        };
+        this._spawnInteractionSet(type);
+        this.floatingTexts.push(new FloatingText(
+            this.canvas.width / 2,
+            72,
+            this.currentObjective.required ? `MANDATORY OBJECTIVE: ${type.toUpperCase()}` : `BONUS OBJECTIVE: ${type.toUpperCase()}`,
+            this.currentObjective.required ? '#ffcc66' : '#7ecfff',
+            12
+        ));
+    }
+
+    _spawnInteractionSet(type) {
+        this.beacons = [];
+        this.trapSigils = [];
+        this.corruptionVents = [];
+        const w = this.canvas.width;
+        const h = this.canvas.height;
+        const rnd = (ax = 0.2, bx = 0.8) => ({
+            x: w * (ax + Math.random() * (bx - ax)),
+            y: h * (ax + Math.random() * (bx - ax)),
+        });
+
+        if (type === 'escort') {
+            const p = rnd();
+            this.beacons.push(new LightBeacon(p.x, p.y));
+            const s1 = rnd(0.15, 0.85);
+            const s2 = rnd(0.15, 0.85);
+            this.trapSigils.push(new TrapSigil(s1.x, s1.y), new TrapSigil(s2.x, s2.y));
+        } else if (type === 'seal') {
+            for (let i = 0; i < OBJECTIVE_RIFT_TARGET; i++) {
+                const p = rnd(0.15, 0.85);
+                this.corruptionVents.push(new CorruptionVent(p.x, p.y));
+            }
+            const s = rnd(0.2, 0.8);
+            this.trapSigils.push(new TrapSigil(s.x, s.y));
+        } else {
+            const p1 = rnd(0.2, 0.8);
+            const p2 = rnd(0.2, 0.8);
+            this.beacons.push(new LightBeacon(p1.x, p1.y));
+            this.beacons.push(new LightBeacon(p2.x, p2.y));
+        }
+    }
+
+    _updateObjective() {
+        if (!this.currentObjective || this.currentObjective.rewardGiven) return;
+        const obj = this.currentObjective;
+        if (obj.type === 'escort') {
+            const inBeacon = this.beacons.some(
+                b => b.active && Math.hypot(this.player.x - b.x, this.player.y - b.y) < b.radius * 0.9
+            );
+            if (inBeacon) obj.progress += this.relicPath === 'guardianPath' ? 3 : 2;
+        }
+
+        if (obj.progress >= obj.target) this._completeObjective();
+    }
+
+    _completeObjective() {
+        if (!this.currentObjective || this.currentObjective.rewardGiven) return;
+        this.currentObjective.rewardGiven = true;
+        this.embers += OBJECTIVE_REWARD_EMBERS;
+        this.objectiveRelics++;
+        this.loreFragments++;
+        this._pushLore(
+            this.currentObjective.type === 'escort' ? 'The Hero remembers a path through the ash.' :
+            this.currentObjective.type === 'seal'   ? 'A sealed rift reveals a name from before the fall.' :
+                                                      'Purified remains whisper the city still waits.'
+        );
+        this.floatingTexts.push(new FloatingText(
+            this.canvas.width / 2,
+            80,
+            'OBJECTIVE COMPLETE +RELIC TOKEN',
+            '#ffffff',
+            14
+        ));
+        this.shockWaves.push(new ShockWave(this.player.x, this.player.y, 170, '#ffffff'));
+    }
+
+    _pushLore(line) {
+        this.loreLine = line;
+        this.loreTimer = 480;
+    }
+
+    _onPilePurified() {
+        if (!this.currentObjective || this.currentObjective.rewardGiven) return;
+        if (this.currentObjective.type === 'purge') {
+            this.currentObjective.progress += this.relicPath === 'purifierPath' ? 2 : 1;
+        }
     }
 
     // Spawns an IgnisFlare pickup at a random ShadowPile position.
@@ -2570,7 +3152,7 @@ class Game {
         const cx = this.canvas.width  / 2;
         const cy = this.canvas.height / 2;
 
-        // Player: trail + cursor follow + orbit (no repel/nova/combo ticks)
+        // Player: trail + cursor follow + orbit (no Nova/combo ticks)
         this.player.trail.push({ x: this.player.x, y: this.player.y });
         if (this.player.trail.length > TRAIL_LENGTH) this.player.trail.shift();
         this.player.x = Math.max(this.player.radius, Math.min(this.canvas.width  - this.player.radius, this.mouseX));
@@ -2592,6 +3174,21 @@ class Game {
         for (let i = this.ambientPulses.length - 1; i >= 0; i--) {
             this.ambientPulses[i].update([]);
             if (this.ambientPulses[i].done) this.ambientPulses.splice(i, 1);
+        }
+
+        this._updateMenuHover();
+    }
+
+    _updateTutorial() {
+        // Keep the world alive behind the tutorial overlay for continuity.
+        this._updateMenu();
+
+        const step = TUTORIAL_STEPS[this.tutorialStep];
+        if (step && step.final) {
+            this.tutorialTimer++;
+            if (this.tutorialTimer >= TUTORIAL_AUTO_RETURN_FRAMES) {
+                this._finishTutorial();
+            }
         }
     }
 
@@ -2624,12 +3221,14 @@ class Game {
         this.audio.play();
         this.audio.setVolume(0.5);
 
+        this._assignObjective();
         this.gameState = 'playing';
     }
 
     update() {
         this.time++;
         if (this.gameState === 'menu')    { this._updateMenu(); return; }
+        if (this.gameState === 'tutorial') { this._updateTutorial(); return; }
         if (this.gameState === 'paused')  { return; }          // world fully frozen
         if (this.gameState === 'gameover') {
             // Fade all audio tracks to silence on the first gameover frame.
@@ -2638,6 +3237,7 @@ class Game {
             if (this.gameOverTimer === 0) {
                 this.audio.fadeAllTo(0, 3000);
                 _saveBest(this.wave, this.score);
+                this._refreshBestCache();
             }
             this.gameOverTimer++;
             return;
@@ -2671,11 +3271,24 @@ class Game {
 
         this.player.update(this.mouseX, this.mouseY, this.shadowPiles, this);
 
+        for (const beacon of this.beacons) beacon.update(this.player, this.hero, this);
+        for (const sigil of this.trapSigils) sigil.update(this.player, this.enemies, this);
+        for (let i = this.trapSigils.length - 1; i >= 0; i--) {
+            if (this.trapSigils[i].dead) this.trapSigils.splice(i, 1);
+        }
+        for (const vent of this.corruptionVents) vent.update(this.player, this);
+        for (let i = this.corruptionVents.length - 1; i >= 0; i--) {
+            if (this.corruptionVents[i].sealed) this.corruptionVents.splice(i, 1);
+        }
+        this._updateObjective();
+
         // Corruption proximity — builds drain when player is near any void pool.
-        // Suppressed entirely while the player is dashing (invulnerability window).
-        if (!this.player.dashActive) {
+        {
+            const zoneSq = CORRUPTION_DRAIN_ZONE * CORRUPTION_DRAIN_ZONE;
             for (const cp of this.corruptionParticles) {
-                if (Math.hypot(this.player.x - cp.x, this.player.y - cp.y) < CORRUPTION_DRAIN_ZONE) {
+                const dx = this.player.x - cp.x;
+                const dy = this.player.y - cp.y;
+                if ((dx * dx + dy * dy) < zoneSq) {
                     this.player.corruptionDrain = Math.min(
                         CORRUPTION_MAX_DRAIN,
                         this.player.corruptionDrain + CORRUPTION_DRAIN_RATE
@@ -2694,7 +3307,12 @@ class Game {
 
         // Track hero HP before enemy updates to detect damage events
         const hpBefore = this.hero.hp;
-        for (const enemy of this.enemies) enemy.update(this.hero);
+        for (const enemy of this.enemies) enemy.update(this.hero, this);
+
+        for (let i = this.shadowBolts.length - 1; i >= 0; i--) {
+            this.shadowBolts[i].update(this.hero, this);
+            if (this.shadowBolts[i].dead) this.shadowBolts.splice(i, 1);
+        }
 
         // Brief screen shake when hero takes a hit (60-frame spam guard)
         if (this.hero.hp < hpBefore && this.damageShakeCooldown <= 0) {
@@ -2774,6 +3392,8 @@ class Game {
             if (this.floatingTexts[i].dead) this.floatingTexts.splice(i, 1);
         }
 
+        if (this.loreTimer > 0) this.loreTimer--;
+
         this.hero.hp = Math.max(0, this.hero.hp);
         if (this.hero.hp <= 0) this.gameState = 'gameover';
     }
@@ -2804,31 +3424,52 @@ class Game {
 
     drawLighting() {
         const lc = this.lightCtx;
+        const dc = this.darknessCtx;
+        const darkness = Math.min(0.95, 0.84 + this.taintAlpha);
+        const threatLoad = this.enemies.length + this.shadowBolts.length + Math.floor(this.corruptionParticles.length * 0.2);
+        const threatBoost = Math.min(PLAYER_LIGHT_THREAT_BONUS_MAX, threatLoad * 0.85);
+        const playerLightRadius = this.player.currentLightRadius + PLAYER_LIGHT_READABILITY_BONUS + threatBoost;
+
+        if (Math.abs(darkness - this.cachedDarknessAlpha) > 0.0001) {
+            dc.clearRect(0, 0, this.darknessCanvas.width, this.darknessCanvas.height);
+            dc.fillStyle = `rgba(0, 0, 0, ${darkness})`;
+            dc.fillRect(0, 0, this.darknessCanvas.width, this.darknessCanvas.height);
+            this.cachedDarknessAlpha = darkness;
+        }
 
         lc.clearRect(0, 0, this.lightCanvas.width, this.lightCanvas.height);
-        // taintAlpha adds up to +6% darkness per 'Continue' milestone, making
-        // the player's light feel progressively smaller each cycle.
-        const darkness = Math.min(0.99, 0.93 + this.taintAlpha);
-        lc.fillStyle = `rgba(0, 0, 0, ${darkness})`;
-        lc.fillRect(0, 0, this.lightCanvas.width, this.lightCanvas.height);
+        lc.drawImage(this.darknessCanvas, 0, 0, this.lightCanvas.width, this.lightCanvas.height);
 
         lc.globalCompositeOperation = 'destination-out';
 
-        const r    = this.player.currentLightRadius;
-        const grad = lc.createRadialGradient(
-            this.player.x, this.player.y, 0,
-            this.player.x, this.player.y, r
-        );
-        grad.addColorStop(0, 'rgba(0, 0, 0, 1)');
-        grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        this._punchLightHole(lc, this.player.x, this.player.y, playerLightRadius, 1);
+        this._punchLightHole(lc, this.player.x, this.player.y, Math.max(20, this.player.radius * 6), 0.75);
 
-        lc.fillStyle = grad;
-        lc.beginPath();
-        lc.arc(this.player.x, this.player.y, r, 0, Math.PI * 2);
-        lc.fill();
+        // Tactical readability: keep interactables discoverable in the dark.
+        for (const beacon of this.beacons) {
+            const radius = beacon.active ? beacon.radius : 42;
+            this._punchLightHole(lc, beacon.x, beacon.y, radius, beacon.active ? 0.9 : 0.35);
+        }
+        for (const sigil of this.trapSigils) {
+            this._punchLightHole(lc, sigil.x, sigil.y, sigil.primed ? 38 : 30, sigil.primed ? 0.55 : 0.3);
+        }
+        for (const vent of this.corruptionVents) {
+            if (!vent.sealed) this._punchLightHole(lc, vent.x, vent.y, 34, 0.45);
+        }
 
         lc.globalCompositeOperation = 'source-over';
         this.ctx.drawImage(this.lightCanvas, 0, 0);
+    }
+
+    _punchLightHole(lc, x, y, radius, strength = 1) {
+        const grad = lc.createRadialGradient(x, y, 0, x, y, radius);
+        grad.addColorStop(0, `rgba(0, 0, 0, ${Math.min(1, strength)})`);
+        grad.addColorStop(0.72, `rgba(0, 0, 0, ${Math.max(0, strength * 0.35)})`);
+        grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        lc.fillStyle = grad;
+        lc.beginPath();
+        lc.arc(x, y, radius, 0, Math.PI * 2);
+        lc.fill();
     }
 
     drawHUD() {
@@ -2839,67 +3480,47 @@ class Game {
         ctx.save();
         ctx.textBaseline = 'alphabetic';
 
-        // ── Left panel: Wave / Score / progress bar / repel / nova / dash ────
-        const repelFrac  = Math.min(1, this.player.repelTimer / REPEL_COOLDOWN);
-        const repelReady = repelFrac >= 1;
+        // ── Left panel: row-based layout for reliable alignment ───────────────
         const novaFrac   = Math.min(1, this.player.novaTimer  / NOVA_COOLDOWN);
         const novaReady  = novaFrac >= 1;
-        const dashFrac   = Math.min(1, this.player.dashTimer  / DASH_COOLDOWN);
-        const dashReady  = dashFrac >= 1;
         const streak     = this.player.streakActive;
         const flareOn    = this.player.flareActive;
+        const hasObjective = !!this.currentObjective;
 
-        // Panel grows by 20px per active optional row (Flare bar + Streak row).
-        // DASH row is always shown (122px base vs previous 102px).
-        const panelH = 122 + (flareOn ? 20 : 0) + (streak ? 20 : 0);
+        const panelH = 164 + (flareOn ? 20 : 0) + (streak ? 20 : 0) + (hasObjective ? 52 : 0);
         ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
         ctx.beginPath();
         ctx.roundRect(pad - 8, pad - 14, 148, panelH, 6);
         ctx.fill();
 
+        let y = pad;
         ctx.font      = `bold 13px ${font}`;
         ctx.fillStyle = 'rgba(200, 220, 255, 0.85)';
         ctx.textAlign = 'left';
-        ctx.fillText(`WAVE   ${this.wave}`,  pad, pad);
-        ctx.fillText(`SCORE  ${this.score}`, pad, pad + 22);
+        ctx.fillText(`WAVE   ${this.wave}`,  pad, y); y += 22;
+        ctx.fillText(`SCORE  ${this.score}`, pad, y); y += 22;
+        ctx.fillText(`EMBER  ${this.embers}`, pad, y); y += 16;
 
         // Wave-progress bar — hidden during boss encounters (boss HP bar replaces it)
         if (!this.currentBoss) {
             const pW = 130;
             ctx.fillStyle = 'rgba(80, 80, 100, 0.5)';
-            ctx.fillRect(pad - 2, pad + 30, pW, 3);
+            ctx.fillRect(pad - 2, y, pW, 3);
             ctx.fillStyle   = '#00ffff';
             ctx.shadowColor = '#00ffff';
             ctx.shadowBlur  = 6;
-            ctx.fillRect(pad - 2, pad + 30, pW * (this.waveTimer / WAVE_DURATION_FRAMES), 3);
+            ctx.fillRect(pad - 2, y, pW * (this.waveTimer / WAVE_DURATION_FRAMES), 3);
             ctx.shadowBlur  = 0;
         }
-
-        // Repel charge row
-        ctx.font      = `bold 11px ${font}`;
-        ctx.fillStyle = repelReady ? '#00ffff' : 'rgba(130, 160, 190, 0.65)';
-        ctx.fillText('REPEL', pad, pad + 52);
-
-        ctx.fillStyle = 'rgba(60, 60, 80, 0.5)';
-        ctx.fillRect(pad + 50, pad + 44, 70, 3);
-
-        if (repelReady) {
-            ctx.fillStyle   = '#00ffff';
-            ctx.shadowColor = '#00ffff';
-            ctx.shadowBlur  = 8;
-        } else {
-            ctx.fillStyle = 'rgba(0, 180, 180, 0.5)';
-        }
-        ctx.fillRect(pad + 50, pad + 44, 70 * repelFrac, 3);
-        ctx.shadowBlur = 0;
+        y += 20;
 
         // Nova charge row
         ctx.font      = `bold 11px ${font}`;
         ctx.fillStyle = novaReady ? '#ffffff' : 'rgba(180, 160, 130, 0.65)';
-        ctx.fillText('NOVA', pad, pad + 72);
+        ctx.fillText('NOVA', pad, y);
 
         ctx.fillStyle = 'rgba(60, 60, 80, 0.5)';
-        ctx.fillRect(pad + 50, pad + 64, 70, 3);
+        ctx.fillRect(pad + 50, y - 8, 70, 3);
 
         if (novaReady) {
             ctx.fillStyle   = '#ffffff';
@@ -2908,56 +3529,65 @@ class Game {
         } else {
             ctx.fillStyle = 'rgba(180, 140, 60, 0.45)';
         }
-        ctx.fillRect(pad + 50, pad + 64, 70 * novaFrac, 3);
+        ctx.fillRect(pad + 50, y - 8, 70 * novaFrac, 3);
         ctx.shadowBlur = 0;
+        y += 20;
 
-        // Dash charge row
-        ctx.font      = `bold 11px ${font}`;
-        ctx.fillStyle = dashReady ? '#00ffff' : 'rgba(130, 160, 190, 0.65)';
-        ctx.fillText('DASH', pad, pad + 92);
-
-        ctx.fillStyle = 'rgba(60, 60, 80, 0.5)';
-        ctx.fillRect(pad + 50, pad + 84, 70, 3);
-
-        if (dashReady) {
-            ctx.fillStyle   = '#ffffff';
-            ctx.shadowColor = '#00ffff';
-            ctx.shadowBlur  = 8;
-        } else {
-            ctx.fillStyle = 'rgba(0, 180, 180, 0.5)';
-        }
-        ctx.fillRect(pad + 50, pad + 84, 70 * dashFrac, 3);
-        ctx.shadowBlur = 0;
-
-        // Flare active bar — displayed directly below Dash when buff is running
+        // Flare active bar — displayed directly below Nova when buff is running
         if (flareOn) {
             const flareFrac = this.player.flareTimer / FLARE_DURATION;
             ctx.font      = `bold 11px ${font}`;
             ctx.fillStyle = '#ffcc00';
-            ctx.fillText('FLARE', pad, pad + 112);
+            ctx.fillText('FLARE', pad, y);
 
             ctx.fillStyle = 'rgba(60, 60, 80, 0.5)';
-            ctx.fillRect(pad + 50, pad + 104, 70, 3);
+            ctx.fillRect(pad + 50, y - 8, 70, 3);
 
             ctx.fillStyle   = '#ffcc00';
             ctx.shadowColor = '#ffcc00';
             ctx.shadowBlur  = 8;
-            ctx.fillRect(pad + 50, pad + 104, 70 * flareFrac, 3);
+            ctx.fillRect(pad + 50, y - 8, 70 * flareFrac, 3);
             ctx.shadowBlur  = 0;
+            y += 20;
         }
 
-        // Streak indicator row — shifts down 20px when Flare bar is also visible
+        // Streak indicator row
         if (streak) {
-            const streakY = pad + 112 + (flareOn ? 20 : 0);
             const blinkA  = 0.7 + 0.3 * Math.abs(Math.sin(this.time * 0.12));
             ctx.font         = `bold 11px ${font}`;
             ctx.globalAlpha  = blinkA;
             ctx.fillStyle    = '#ffffff';
             ctx.shadowColor  = '#ffffff';
             ctx.shadowBlur   = 8;
-            ctx.fillText(`STREAK  ×${this.player.comboCount}`, pad, streakY);
+            ctx.fillText(`STREAK  ×${this.player.comboCount}`, pad, y);
             ctx.shadowBlur   = 0;
             ctx.globalAlpha  = 1;
+            y += 20;
+        }
+
+        // Objective tracker — primary goal signal for the current wave
+        if (hasObjective) {
+            const obj = this.currentObjective;
+            const label = obj.type === 'escort' ? 'HOLD SANCTUARY'
+                : obj.type === 'seal' ? 'SEAL RIFTS'
+                    : 'PURGE PILES';
+            const frac = Math.min(1, obj.target > 0 ? obj.progress / obj.target : 0);
+            ctx.font = `bold 11px ${font}`;
+            ctx.fillStyle = obj.rewardGiven ? '#4cff91' : '#ffe566';
+            const gateTag = obj.required ? 'REQ' : 'BONUS';
+            ctx.fillText(`GOAL  ${label}`, pad, y);
+            y += 14;
+            ctx.font = `bold 9px ${font}`;
+            ctx.fillStyle = obj.rewardGiven ? '#4cff91' : 'rgba(200, 220, 255, 0.85)';
+            ctx.fillText(`[${gateTag}]  ${Math.floor(obj.progress)}/${obj.target}`, pad, y);
+            ctx.fillStyle = 'rgba(60, 60, 80, 0.5)';
+            ctx.fillRect(pad + 50, y - 8, 70, 3);
+            ctx.fillStyle = obj.rewardGiven ? '#4cff91' : '#00ffff';
+            ctx.fillRect(pad + 50, y - 8, 70 * frac, 3);
+            y += 14;
+            ctx.font = `9px ${font}`;
+            ctx.fillStyle = 'rgba(170, 195, 235, 0.78)';
+            ctx.fillText(obj.hint || 'Complete the current goal.', pad, y);
         }
 
         // ── Right panel: Upgrade indicators ──────────────────────────────────
@@ -3011,6 +3641,7 @@ class Game {
         ctx.globalAlpha  = this.audio.muted ? 0.45 : 0.72;
         ctx.fillText(this.audio.muted ? '🔇' : '🔊', muteX, muteY);
 
+        ctx.textBaseline = 'alphabetic';
         ctx.font         = `9px ${font}`;
         ctx.fillStyle    = 'rgba(140, 160, 190, 0.38)';
         ctx.globalAlpha  = 1;
@@ -3019,7 +3650,7 @@ class Game {
         ctx.textAlign = 'left';
 
         // ── Personal Best — bottom-left corner ───────────────────────────────
-        const best = _loadBest();
+        const best = this.bestCache;
         if (best.wave > 0) {
             ctx.font      = `9px ${font}`;
             ctx.textAlign = 'left';
@@ -3028,6 +3659,18 @@ class Game {
                 `BEST  W:${best.wave}  S:${best.score}`,
                 pad, this.canvas.height - pad
             );
+        }
+
+        if (this.loreTimer > 0 && this.loreLine) {
+            const a = Math.min(1, this.loreTimer / 45);
+            ctx.font = `10px ${font}`;
+            ctx.textAlign = 'center';
+            ctx.globalAlpha = a;
+            ctx.fillStyle = 'rgba(230, 235, 255, 0.85)';
+            const loreY = this.canvas.height - (MINIMAP_RADIUS * 2 + MINIMAP_MARGIN + 12);
+            ctx.fillText(this.loreLine, this.canvas.width / 2, loreY);
+            ctx.globalAlpha = 1;
+            ctx.textAlign = 'left';
         }
 
         ctx.restore();
@@ -3299,6 +3942,7 @@ class Game {
             ctx.fillText('Waves Endured',     cx - 14, cy - 12);
             ctx.fillText('Shadows Purged',    cx - 14, cy + 14);
             ctx.fillText('Milestones Passed', cx - 14, cy + 40);
+            ctx.fillText('Lore Fragments',    cx - 14, cy + 66);
 
             ctx.textAlign = 'left';
             ctx.font      = `bold 13px ${font}`;
@@ -3306,6 +3950,7 @@ class Game {
             ctx.fillText(`${this.wave}`,       cx + 22, cy - 12);
             ctx.fillText(`${this.score}`,       cx + 22, cy + 14);
             ctx.fillText(`${this.scaleLevel}`,  cx + 22, cy + 40);
+            ctx.fillText(`${this.loreFragments}`,  cx + 22, cy + 66);
 
             // Second divider
             ctx.globalAlpha = fade(50);
@@ -3313,7 +3958,7 @@ class Game {
             ctx.strokeStyle = 'rgba(80, 55, 160, 0.22)';
             ctx.lineWidth   = 0.5;
             ctx.beginPath();
-            ctx.moveTo(cx - dW / 2, cy + 58); ctx.lineTo(cx + dW / 2, cy + 58);
+            ctx.moveTo(cx - dW / 2, cy + 84); ctx.lineTo(cx + dW / 2, cy + 84);
             ctx.stroke();
 
             // Prompts
@@ -3323,7 +3968,7 @@ class Game {
             ctx.fillStyle   = 'rgba(50, 38, 110, 0.82)';
             ctx.shadowColor = 'rgba(80, 55, 200, 0.35)';
             ctx.shadowBlur  = 8;
-            ctx.fillText('[R]  Restart          [M]  Return to Menu', cx, cy + 92);
+            ctx.fillText('[R]  Restart          [M]  Return to Menu', cx, cy + 112);
             ctx.shadowBlur  = 0;
         }
 
@@ -3416,7 +4061,7 @@ class Game {
     // Draws over the already-rendered world (grid + entities + lighting) to
     // create a diegetic onboarding screen.  Three spatial layers:
     //   1. World-space elements  — MenuCircle ring, entity labels
-    //   2. Screen-space title    — 'IGNIS FATUUS' + subtitle + SPACE prompt
+    //   2. Screen-space title    — 'IGNIS FATUUS' + subtitle + menu buttons
     //   3. Screen-space sidebar  — How to Play panel (right edge)
     drawMenu() {
         const ctx  = this.ctx;
@@ -3509,19 +4154,112 @@ class Game {
         ctx.fillStyle = 'rgba(140, 175, 220, 0.52)';
         ctx.fillText('— A GAME OF LIGHT AND SHADOW —', cx, ch * 0.14 + 46);
 
-        // ── PRESS SPACE TO START — pulsing ethereal prompt ────────────────────
-        const startA = 0.5 + 0.5 * Math.abs(Math.sin(t * 0.055));
-        ctx.font        = `bold 15px ${font}`;
-        ctx.fillStyle   = `rgba(255, 247, 161, ${startA})`;
-        ctx.shadowColor = '#ffe566';
-        ctx.shadowBlur  = startA * 16;
-        ctx.fillText('PRESS  SPACE  TO  START', cx, ch * 0.84);
-        ctx.shadowBlur  = 0;
+        const { playRect, tutorialRect } = this._getMenuRects();
+        this._drawMenuButton(ctx, playRect, 'PLAY GAME', this.menuHover === 'play', '#00ffff');
+        this._drawMenuButton(ctx, tutorialRect, 'TUTORIAL', this.menuHover === 'tutorial', '#ffe566');
+
+        // Keep a keyboard fast-start for power users while menu remains button-led.
+        ctx.font      = `10px ${font}`;
+        ctx.fillStyle = 'rgba(190, 210, 240, 0.56)';
+        ctx.fillText('SPACE = QUICK START', cx, ch * 0.90);
 
         ctx.restore();
 
         // How to Play panel (own save/restore)
         this._drawHowToPlay(ctx);
+    }
+
+    _drawMenuButton(ctx, rect, label, hovered, glowColor) {
+        const font = '"Courier New", monospace';
+        const pulse = 0.65 + 0.35 * Math.abs(Math.sin(this.time * 0.05));
+        const edgeA = hovered ? 0.72 : 0.38;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 8);
+        ctx.fillStyle = hovered ? 'rgba(10, 25, 35, 0.88)' : 'rgba(8, 14, 28, 0.80)';
+        ctx.fill();
+
+        ctx.lineWidth = hovered ? 2 : 1.2;
+        ctx.strokeStyle = hovered
+            ? `rgba(255, 255, 255, ${0.3 + pulse * 0.35})`
+            : `rgba(140, 180, 220, ${edgeA})`;
+        if (hovered) {
+            ctx.shadowColor = glowColor;
+            ctx.shadowBlur = 12;
+        }
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = `bold 14px ${font}`;
+        ctx.fillStyle = hovered ? '#ffffff' : 'rgba(205, 222, 245, 0.88)';
+        ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+        ctx.restore();
+    }
+
+    drawTutorial() {
+        const ctx = this.ctx;
+        const cw = this.canvas.width;
+        const ch = this.canvas.height;
+        const font = '"Courier New", monospace';
+        const step = TUTORIAL_STEPS[this.tutorialStep] || TUTORIAL_STEPS[0];
+        const finalStep = !!step.final;
+        const panelW = Math.min(760, Math.floor(cw * 0.76));
+        const panelH = 320;
+        const px = (cw - panelW) / 2;
+        const py = (ch - panelH) / 2;
+
+        ctx.save();
+        ctx.fillStyle = 'rgba(4, 6, 16, 0.80)';
+        ctx.fillRect(0, 0, cw, ch);
+
+        ctx.beginPath();
+        ctx.roundRect(px, py, panelW, panelH, 10);
+        ctx.fillStyle = 'rgba(8, 12, 30, 0.92)';
+        ctx.fill();
+        ctx.lineWidth = 1.2;
+        ctx.strokeStyle = 'rgba(0, 255, 255, 0.35)';
+        ctx.stroke();
+
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.font = `bold 13px ${font}`;
+        ctx.fillStyle = 'rgba(126, 207, 255, 0.88)';
+        ctx.fillText(`TUTORIAL ${this.tutorialStep + 1}/${TUTORIAL_STEPS.length}`, px + 22, py + 26);
+
+        ctx.font = `bold 28px ${font}`;
+        ctx.fillStyle = finalStep ? '#ffe566' : '#00ffff';
+        ctx.shadowColor = finalStep ? '#ffe566' : '#00ffff';
+        ctx.shadowBlur = 16;
+        ctx.fillText(step.title, px + 22, py + 74);
+        ctx.shadowBlur = 0;
+
+        ctx.font = `bold 15px ${font}`;
+        ctx.fillStyle = 'rgba(216, 230, 255, 0.92)';
+        let ly = py + 128;
+        for (const line of step.lines) {
+            ctx.fillText(line, px + 26, ly);
+            ly += 38;
+        }
+
+        if (!finalStep) {
+            const promptA = 0.55 + 0.45 * Math.abs(Math.sin(this.time * 0.06));
+            ctx.font = `bold 12px ${font}`;
+            ctx.fillStyle = `rgba(255, 247, 161, ${promptA})`;
+            ctx.textAlign = 'right';
+            ctx.fillText('SPACE / ENTER / CLICK TO CONTINUE', px + panelW - 24, py + panelH - 26);
+        } else {
+            const remaining = Math.max(0, TUTORIAL_AUTO_RETURN_FRAMES - this.tutorialTimer);
+            const seconds = (remaining / 60).toFixed(1);
+            ctx.font = `bold 12px ${font}`;
+            ctx.textAlign = 'right';
+            ctx.fillStyle = 'rgba(255, 247, 161, 0.85)';
+            ctx.fillText(`RETURNING TO MENU IN ${seconds}s`, px + panelW - 24, py + panelH - 26);
+        }
+
+        ctx.restore();
     }
 
     // ── 'How to Play' right-edge panel ────────────────────────────────────────
@@ -3533,7 +4271,7 @@ class Game {
         const ch   = this.canvas.height;
         const font = '"Courier New", monospace';
         const panW = 256;
-        const panH = 238;   // 5 ability rows + 2 system rows × 26px + 50px header
+        const panH = 260;   // trimmed after Dash removal
         const panX = cw - 28 - panW;
         const panY = ch / 2 - panH / 2;
 
@@ -3567,11 +4305,12 @@ class Game {
         ctx.stroke();
 
         const rows = [
-            { key: 'SPACE', desc: 'Kinetic Repel  —  Push',       color: '#00ffff' },
             { key: 'F',     desc: 'Lumen Nova  —  Clear  (15s)',   color: '#ffffff' },
-            { key: 'SHIFT', desc: 'Lumen Dash  —  Blink  (3s)',   color: '#00ffff' },
             { key: 'HOVER', desc: 'Cleanse Shadow Piles',          color: '#b44fff' },
             { key: 'COMBO', desc: '3+ Cleans  →  Light Boost',    color: '#4cff91' },
+            { key: 'GOAL',  desc: 'Follow the current wave goal',  color: '#ffe566' },
+            { key: 'SAFE',  desc: 'Sanctuary charges Nova',        color: '#d7f5ff' },
+            { key: 'RIFT',  desc: 'Seal vents / prime sigils',     color: '#dd99ff' },
             { key: 'ESC',   desc: 'Pause  /  Unpause',             color: '#9999cc' },
             { key: 'M',     desc: 'Toggle Mute',                   color: '#9999cc' },
         ];
@@ -3671,98 +4410,114 @@ class Game {
         const mmCY    = this.canvas.height - margin - R;
         const worldCX = this.canvas.width  / 2;
         const worldCY = this.canvas.height / 2;
+        const cacheCtx = this.minimapCacheCtx;
+        const size = R * 2 + 8;
+        const ox = 4;
+        const oy = 4;
 
-        // Project world coordinates onto the minimap surface
-        const proj = (wx, wy) => ({
-            x: mmCX + (wx - worldCX) * S,
-            y: mmCY + (wy - worldCY) * S,
-        });
+        this.minimapTick++;
+        const shouldRefresh = this.minimapTick === 1 || this.minimapTick % MINIMAP_UPDATE_INTERVAL === 0;
+        if (shouldRefresh) {
+            cacheCtx.clearRect(0, 0, size, size);
 
-        // ── Clipped interior (background + dots) ─────────────────────────────
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(mmCX, mmCY, R, 0, Math.PI * 2);
-        ctx.clip();
+            // ── Clipped interior (background + dots) ─────────────────────────
+            cacheCtx.save();
+            cacheCtx.beginPath();
+            cacheCtx.arc(ox + R, oy + R, R, 0, Math.PI * 2);
+            cacheCtx.clip();
 
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.68)';
-        ctx.fillRect(mmCX - R, mmCY - R, R * 2, R * 2);
+            cacheCtx.fillStyle = 'rgba(0, 0, 0, 0.68)';
+            cacheCtx.fillRect(ox, oy, R * 2, R * 2);
 
-        // Shadow Piles — teal-green dots
-        for (const pile of this.shadowPiles) {
-            const p = proj(pile.x, pile.y);
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
-            ctx.fillStyle = '#00ff88';
-            ctx.fill();
+            const px = (wx) => ox + R + (wx - worldCX) * S;
+            const py = (wy) => oy + R + (wy - worldCY) * S;
+
+            // Shadow Piles — teal-green dots
+            cacheCtx.fillStyle = '#00ff88';
+            cacheCtx.beginPath();
+            for (const pile of this.shadowPiles) {
+                cacheCtx.moveTo(px(pile.x) + 2, py(pile.y));
+                cacheCtx.arc(px(pile.x), py(pile.y), 2, 0, Math.PI * 2);
+            }
+            cacheCtx.fill();
+
+            // Beacons — cyan rings
+            cacheCtx.lineWidth = 1;
+            for (const b of this.beacons) {
+                const bx = px(b.x);
+                const by = py(b.y);
+                cacheCtx.beginPath();
+                cacheCtx.arc(bx, by, b.active ? 3 : 2, 0, Math.PI * 2);
+                cacheCtx.strokeStyle = b.active ? '#7ecfff' : 'rgba(126, 207, 255, 0.45)';
+                cacheCtx.stroke();
+            }
+
+            // Trap sigils — gold points (larger when armed)
+            for (const s of this.trapSigils) {
+                if (s.dead) continue;
+                cacheCtx.beginPath();
+                cacheCtx.arc(px(s.x), py(s.y), s.primed ? 3 : 2, 0, Math.PI * 2);
+                cacheCtx.fillStyle = s.primed ? '#ffe566' : 'rgba(255, 229, 102, 0.7)';
+                cacheCtx.fill();
+            }
+
+            // Vents — purple dots until sealed
+            cacheCtx.fillStyle = '#e080ff';
+            cacheCtx.beginPath();
+            for (const v of this.corruptionVents) {
+                if (v.sealed) continue;
+                cacheCtx.moveTo(px(v.x) + 2.5, py(v.y));
+                cacheCtx.arc(px(v.x), py(v.y), 2.5, 0, Math.PI * 2);
+            }
+            cacheCtx.fill();
+
+            // Enemies — red dots (skip dissolving); WraithPrime gets a larger purple dot
+            cacheCtx.fillStyle = '#ff3030';
+            cacheCtx.beginPath();
+            for (const e of this.enemies) {
+                if (e.dying || e instanceof WraithPrime) continue;
+                cacheCtx.moveTo(px(e.x) + 2, py(e.y));
+                cacheCtx.arc(px(e.x), py(e.y), 2, 0, Math.PI * 2);
+            }
+            cacheCtx.fill();
+
+            // Boss — large pulsing purple dot
+            if (this.currentBoss && !this.currentBoss.dying) {
+                const bPulse = 0.7 + 0.3 * Math.abs(Math.sin(this.time * 0.08));
+                cacheCtx.beginPath();
+                cacheCtx.arc(px(this.currentBoss.x), py(this.currentBoss.y), 5.5, 0, Math.PI * 2);
+                cacheCtx.fillStyle = `rgba(180, 60, 255, ${bPulse})`;
+                cacheCtx.fill();
+            }
+
+            // Hero — teal dot
+            cacheCtx.beginPath();
+            cacheCtx.arc(px(this.hero.x), py(this.hero.y), 3.5, 0, Math.PI * 2);
+            cacheCtx.fillStyle = '#00ffff';
+            cacheCtx.fill();
+
+            // Player — warm yellow dot
+            cacheCtx.beginPath();
+            cacheCtx.arc(px(this.player.x), py(this.player.y), 2.5, 0, Math.PI * 2);
+            cacheCtx.fillStyle = '#fff7a1';
+            cacheCtx.fill();
+
+            cacheCtx.restore();
         }
 
-        // Corruption pools — faint purple smudges
-        for (const cp of this.corruptionParticles) {
-            const p = proj(cp.x, cp.y);
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, 1.5, 0, Math.PI * 2);
-            ctx.fillStyle = 'rgba(140, 0, 220, 0.55)';
-            ctx.fill();
-        }
-
-        // Enemies — red dots (skip dissolving); WraithPrime gets a larger purple dot
-        for (const e of this.enemies) {
-            if (e.dying) continue;
-            if (e instanceof WraithPrime) continue; // drawn separately below
-            const p = proj(e.x, e.y);
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
-            ctx.fillStyle = '#ff3030';
-            ctx.fill();
-        }
-
-        // Boss — large pulsing purple dot
-        if (this.currentBoss && !this.currentBoss.dying) {
-            const bp    = proj(this.currentBoss.x, this.currentBoss.y);
-            const bPulse = 0.7 + 0.3 * Math.abs(Math.sin(this.time * 0.08));
-            ctx.beginPath();
-            ctx.arc(bp.x, bp.y, 5.5, 0, Math.PI * 2);
-            ctx.fillStyle   = `rgba(180, 60, 255, ${bPulse})`;
-            ctx.shadowColor = '#cc44ff';
-            ctx.shadowBlur  = 8;
-            ctx.fill();
-            ctx.shadowBlur  = 0;
-        }
-
-        // Hero — teal dot (larger, with glow)
-        const hp = proj(this.hero.x, this.hero.y);
-        ctx.beginPath();
-        ctx.arc(hp.x, hp.y, 3.5, 0, Math.PI * 2);
-        ctx.fillStyle   = '#00ffff';
-        ctx.shadowColor = '#00ffff';
-        ctx.shadowBlur  = 5;
-        ctx.fill();
-        ctx.shadowBlur  = 0;
-
-        // Player — warm yellow dot
-        const pp = proj(this.player.x, this.player.y);
-        ctx.beginPath();
-        ctx.arc(pp.x, pp.y, 2.5, 0, Math.PI * 2);
-        ctx.fillStyle = '#fff7a1';
-        ctx.fill();
-
-        ctx.restore(); // end clip
+        // Blit cached minimap
+        ctx.drawImage(this.minimapCacheCanvas, mmCX - R - 4, mmCY - R - 4);
 
         // ── Cyan border ring — drawn after restore so it isn't clipped ───────
         ctx.beginPath();
         ctx.arc(mmCX, mmCY, R, 0, Math.PI * 2);
         ctx.strokeStyle = '#00ffff';
         ctx.lineWidth   = 1;
-        ctx.shadowColor = '#00ffff';
-        ctx.shadowBlur  = 6;
         ctx.stroke();
-        ctx.shadowBlur  = 0;
     }
 
     draw() {
         const ctx = this.ctx;
-        ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-
         ctx.fillStyle = '#1a1a1a';
         ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
@@ -3794,13 +4549,20 @@ class Game {
         // Draw order: particles → ambient pulses → shockwaves → piles →
         //   corruption pools → flares → orbs → enemies → boss (above all) →
         //   hero → trail → player → lighting
-        for (const p     of this.particles)            p.draw(ctx);
-        for (const ap    of this.ambientPulses)        ap.draw(ctx);
-        for (const sw    of this.shockWaves)           sw.draw(ctx);
-        for (const pile  of this.shadowPiles)          pile.draw(ctx, this.cleanFrames, this.time);
-        for (const cp    of this.corruptionParticles)  cp.draw(ctx);
-        for (const flare of this.ignisFlares)          flare.draw(ctx);
-        for (const orb   of this.healOrbs)             orb.draw(ctx);
+        const w = this.canvas.width;
+        const h = this.canvas.height;
+        const visible = (x, y, m = 64) => x > -m && x < w + m && y > -m && y < h + m;
+        for (const p of this.particles) if (visible(p.x, p.y, 24)) p.draw(ctx);
+        for (const ap of this.ambientPulses) if (visible(ap.x, ap.y, ap.radius + 8)) ap.draw(ctx);
+        for (const sw of this.shockWaves) if (visible(sw.x, sw.y, sw.radius + 8)) sw.draw(ctx);
+        for (const beacon of this.beacons) if (visible(beacon.x, beacon.y, beacon.radius + 8)) beacon.draw(ctx, this.time);
+        for (const sigil of this.trapSigils) if (visible(sigil.x, sigil.y, 50)) sigil.draw(ctx, this.time);
+        for (const pile of this.shadowPiles) if (visible(pile.x, pile.y, pile.radius + 10)) pile.draw(ctx, this.cleanFrames, this.time);
+        for (const vent of this.corruptionVents) if (visible(vent.x, vent.y, 44)) vent.draw(ctx, this.time);
+        for (const cp of this.corruptionParticles) if (visible(cp.x, cp.y, 28)) cp.draw(ctx);
+        for (const bolt of this.shadowBolts) if (visible(bolt.x, bolt.y, 20)) bolt.draw(ctx);
+        for (const flare of this.ignisFlares) if (visible(flare.x, flare.y, 30)) flare.draw(ctx);
+        for (const orb of this.healOrbs) if (visible(orb.x, orb.y, 24)) orb.draw(ctx);
         // Standard enemies first, then boss on top
         for (const e of this.enemies) {
             if (e !== this.currentBoss) e.draw(ctx);
@@ -3828,6 +4590,12 @@ class Game {
         // Menu overlay — world renders beneath it; early-return suppresses HUD/minimap
         if (this.gameState === 'menu') {
             this.drawMenu();
+            return;
+        }
+
+        // Tutorial overlay — guided onboarding scene above live world backdrop
+        if (this.gameState === 'tutorial') {
+            this.drawTutorial();
             return;
         }
 

@@ -1,6 +1,6 @@
 # Ignis Fatuus
 
-**Status:** Core Engine — In Development
+**Status:** Playable Prototype — Portfolio / Game Jam Build
 
 ---
 
@@ -9,6 +9,8 @@
 *Ignis Fatuus* (Latin: "foolish fire") is a top-down, browser-based game built with Vanilla JavaScript and the HTML5 Canvas API. The player controls a glowing wisp of light — a 'Spark' — navigating a dark arena where an autonomous Hero NPC battles waves of enemies.
 
 The core loop revolves around a **Cleaner Mechanic**: enemies slain by the Hero leave 'Shadow Piles'. The player must hover their Spark over each pile for 1.5 seconds to cleanse it, which then spawns a Heal Orb that seeks the Hero. Without the player's intervention, the Hero is overwhelmed by both enemies and accumulated shadow.
+
+Current playtest-driven expansion adds rotating **wave objectives**, enemy archetype variety, and environmental interactions (beacons, sigils, vents) so each wave has a tactical purpose beyond pure survival.
 
 **Technology Stack:**
 - Vanilla JavaScript (ES6 Classes — no frameworks)
@@ -20,6 +22,21 @@ The core loop revolves around a **Cleaner Mechanic**: enemies slain by the Hero 
 - Off-screen canvas for the `destination-out` radial lighting pass
 - Linear interpolation (lerp) for smooth HealOrb movement
 - Frame-counted state machine for Hero AI
+
+### Runtime Architecture Snapshot
+
+- `index.html` + `style.css`: canvas shell and overlays (store/pause UX).
+- `game.js`: monolithic runtime with all entities (`Player`, `Hero`, `Enemy`, `WraithPrime`) and orchestrator logic (`Game`).
+- `Game.update()` controls the per-frame simulation pipeline: input-driven player updates, objective/interactable checks, spawning, AI ticks, combat resolution, rewards, and state transitions.
+- `Game.draw()` handles the layered render pass: world entities, lighting mask, UI/HUD, then state overlays (menu, milestone, game over, victory).
+- Progression stack combines wave pacing, store upgrades, objective rewards, and milestone branching (Ascend vs Continue).
+
+### Current Core Controls
+
+- Mouse: move the Spark
+- `F` or Left Click: Lumen Nova (burst clear)
+- Hover: cleanse piles, prime sigils, activate beacons, seal vents
+- `Esc`/`P`: Pause, `M`: Mute toggle
 
 ---
 
@@ -36,13 +53,13 @@ All AI-generated contributions are documented in `refinements-changes.md` to mai
 Project Reflection: Ignis Fatuus
 AI Excellence & Limitations
 
-AI was extremely good in Rapid Prototyping and Procedural Generation. It allowed me to implement a complex Web Audio synthesizer and a Finite State Machine in hours rather than days. However, it occasionally hallucinated during the Lumen Dash implementation, where it struggled to  the mouse-follow logic with velocity-based movement. I had to step in as the Lead Developer to manually override the input priority, proving that while AI can provide the "bricks," the developer must provide the "blueprint."
+AI was extremely good in Rapid Prototyping and Procedural Generation. It allowed me to implement a complex Web Audio synthesizer and a Finite State Machine in hours rather than days. However, it occasionally hallucinated during mobility ability work (the later-removed Lumen Dash), where it struggled to reconcile mouse-follow logic with velocity-based movement. I had to step in as the Lead Developer to manually override input priority, proving that while AI can provide the "bricks," the developer must provide the "blueprint."
 Alteration of Process
 
 The collaboration shifted my process from "Writing Code" to "Architectural Orchestration." Instead of getting bogged down in syntax, I focused on Game Feel (Swink, 2009) and Difficulty Scaling. My technical process became iterative: I would prompt a core mechanic, test the "juice" (screenshake, particles), and then use AI to "refactor" for performance. Next time, I would spend more time defining the Data Schema upfront to prevent the AI from hallucinating variable names between sessions.
 Ethical Considerations & Transparency
 
-Originality was maintained by using AI as a Technical Consultant rather than a "black box" creator. Every mechanic—from the Wraith Prime's corruption to the Hero’s light decay—originated from my design goals. All AI-assisted code and synthesized audio have been documented in the Refinement Logs (Entry 001–019) to ensure full transparency. I believe this use constitutes Fair Use, as the AI synthesized generic programming patterns into a unique, transformative creative work.
+Originality was maintained by using AI as a Technical Consultant rather than a "black box" creator. Every mechanic—from the Wraith Prime's corruption to the Hero’s light decay—originated from my design goals. All AI-assisted code and synthesized audio have been documented in the Refinement Logs (Entry 001–025) to ensure full transparency. I believe this use constitutes Fair Use, as the AI synthesized generic programming patterns into a unique, transformative creative work.
 Responsibility & Authenticity
 
 To ensure future work remains authentic, I maintain a "Human-in-the-Loop" policy. I never "blind-copy" code; I analyze the logic to ensure I can maintain it manually. By treating the AI as a Junior Developer under my supervision, I ensure the creative "soul" of the game—the dark ambient atmosphere and the emotional weight of the escort mechanic—remains my own.

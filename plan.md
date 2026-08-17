@@ -104,3 +104,11 @@
 | Final `readme.md` — AI Ethics Statement, Overview, IIE references | Pending |
 | Final `refinements-changes.md` review | Pending |
 | Playtesting & bug fixes | Pending |
+| Post-playtest purpose & variety expansion (objectives, enemy archetypes, world interactables, lore beats) | Complete |
+| Deadline stability and professional polish pass (mixed objective gating, no Repel, HUD + visibility fixes) | Complete |
+| Runtime optimization pass (frame-time stability under heavy entity load) | Complete |
+| Tutorial scene flow from main menu (guided onboarding + auto-return) | Complete |
+| Sanctuary incentive + sealed-rift despawn optimization pass | Complete |
+| Level progression rebalance (easy start, progressive scaling, upgrade per level) | Complete |
+| Player visibility readability pass (dark theme preserved) | Complete |
+| Remove Dash + ship-hygiene / clarity / early-fun ROI polish | Complete |

@@ -558,6 +558,246 @@ Swink, S. 2009. *Game Feel: A Game Designer's Guide to Virtual Sensation*. Burli
 
 ---
 
+## Entry 021 — Main Menu Tutorial Scene and Guided Return Flow
+
+**Date:** 14 August 2026
+
+**Feature added:**
+
+- Added a dedicated `tutorial` game state and scene overlay that can be launched from the main menu.
+- Replaced the single start prompt emphasis with explicit menu buttons: **PLAY GAME** and **TUTORIAL**.
+- Added guided tutorial cards that explain movement, cleansing, abilities, and objective/interactable systems.
+- Added a final cinematic-style sign-off line and automatic return to the main menu.
+
+**Logic explanation (why this approach):**
+
+- A separate state-driven scene keeps onboarding logic isolated from active gameplay systems, reducing coupling and preventing tutorial-specific conditions from leaking into combat/update loops.
+- Button-driven menu actions improve discoverability for new players by exposing the tutorial path at first glance, while retaining a keyboard quick-start (`SPACE`) for existing players.
+- Tutorial progression uses a fixed step array (`TUTORIAL_STEPS`) so onboarding content is easy to tune and extend without modifying render or input architecture.
+- The final tutorial card auto-returns after a short delay (`TUTORIAL_AUTO_RETURN_FRAMES`) to create clear closure and keep the player in the intended front-door flow (menu → play).
+
+**AI Collaboration Note:**
+
+- AI suggested implementing tutorial progression as a dedicated scene/state with data-driven step content rather than embedding one-off prompts directly in gameplay logic.
+- AI suggested dual interaction support (`SPACE/ENTER/CLICK`) for tutorial advance to match both keyboard and mouse play styles and reduce onboarding friction.
+- AI suggested preserving animated world ambience behind the tutorial overlay for visual continuity while still keeping gameplay simulation non-interactive.
+
+---
+
+## Entry 022 — Sanctuary Incentive and Sealed Rift Despawn Optimization
+
+**Date:** 14 August 2026
+
+**Feature added:**
+
+- Sealed `CorruptionVent` rifts now despawn from `corruptionVents` after sealing, removing them from further update and draw loops.
+- `LightBeacon` sanctuaries now provide direct player value while active:
+  - rapid corruption-drain cleansing,
+  - accelerated Nova recharge,
+  - accelerated Dash recharge.
+- Added sanctuary benefit messaging:
+  - floating text on sanctuary entry,
+  - updated onboarding/help copy to explain that sanctuaries recharge the player’s light cadence.
+
+**Logic explanation (why this approach):**
+
+- Rifts were functionally complete after sealing, so keeping sealed vents alive in runtime arrays created unnecessary per-frame overhead. Despawning them immediately reduces script work and visual clutter without changing objective logic.
+- The player does not have a direct HP pool, so giving sanctuaries Hero-only healing produced weak player motivation. Reframing sanctuary value around player-centric resources (corruption pressure and cooldown tempo) creates immediate tactical incentive to path toward beacons.
+- The recharge values are additive and clamped to existing cooldown ceilings, preserving balance while making sanctuary positioning meaningfully rewarding under pressure.
+
+**AI Collaboration Note:**
+
+- AI suggested pairing optimization (sealed-rift despawn) with a game-feel incentive pass so the change improves both performance and player decision quality in one iteration.
+- AI suggested using player resource cadence (Dash/Nova recovery and corruption recovery) as the sanctuary reward vector, because it aligns with the current no-player-HP architecture.
+
+---
+
+## Entry 023 — Level Progression Rebalance (Easy Start, Progressive Difficulty, Upgrade Cadence)
+
+**Date:** 14 August 2026
+
+**Feature added:**
+
+- Rebalanced early-game baseline difficulty to start slower:
+  - reduced base enemy speed (`ENEMY_BASE_SPEED`),
+  - increased initial spawn interval (`ENEMY_SPAWN_FRAMES`).
+- Delayed archetype pressure and burst intensity in early levels:
+  - burst double-spawn now starts from level 3,
+  - enemy role unlocks are pushed later (`harrier` 3, `hexer` 5, `warden` 7).
+- Replaced flat level scaling with tiered progression helpers:
+  - `_getLevelScalingStep(wave)`,
+  - `_applyLevelScaling(wave)`,
+  - `_getContinueScalingStep(wave)`.
+- Unified store entry into `_openStoreForCompletedLevel()` so completed levels consistently route to the upgrade choice flow while preserving milestone branching.
+
+**Logic explanation (why this approach):**
+
+- A flat scaling curve created abrupt pressure early and less readable pacing over time. Tiered scaling allows deliberate progression bands: gentle early acceleration, stable mid-game growth, and stronger late-game pressure.
+- Early enemy-role and burst throttling protects onboarding by reducing simultaneous complexity (speed, composition, and density) in the first few levels.
+- A shared store-routing helper reduces branch drift risk across normal waves, boss completion, and milestone-continue logic, keeping the “level complete -> upgrade choice” contract consistent.
+
+**AI Collaboration Note:**
+
+- AI suggested moving from static per-wave deltas to staged scaling tiers to better match desired game-feel pacing (slow opening, sharper late climb).
+- AI suggested extracting store-open routing to one helper to prevent progression regressions when future branch logic changes.
+
+---
+
+## Entry 024 — Player Visibility Readability Pass (Dark Theme Preserved)
+
+**Date:** 14 August 2026
+
+**Feature added:**
+
+- Improved player readability in dark scenes without lifting global ambience:
+  - added a dedicated contrast ring and brighter core highlight around the Spark,
+  - increased local player light reveal with a fixed readability bonus,
+  - added adaptive light expansion under high combat load (enemies/projectiles/corruption density).
+- Kept atmospheric darkness baseline intact by changing only local player-centric visibility layers.
+
+**Logic explanation (why this approach):**
+
+- The issue was spatial readability around the player, not global art direction. Localized visibility boosts preserve mood while reducing “where am I?” loss during pressure spikes.
+- A contrast ring around the player creates consistent silhouette separation against dark backgrounds and overlapping VFX, which is especially important in high-movement moments.
+- Adaptive light scaling tied to threat load increases clarity exactly when cognitive load is highest, then relaxes back down in calmer moments to maintain tone.
+
+**AI Collaboration Note:**
+
+- AI suggested using a player-local readability layer (core + ring + local light-radius boost) rather than global brightness changes, to protect theme while solving gameplay legibility.
+- AI suggested lightweight adaptive visibility linked to active threat density for automatic readability assistance during high-chaos waves.
+
+---
+
+## Entry 025 — Remove Dash + Ship Hygiene / Clarity / Early-Fun ROI Polish
+
+**Date:** 16 August 2026
+
+**Feature added:**
+
+- Removed the **Lumen Dash** ability end-to-end (constants, player state/movement, Shift/right-click bindings, dash SFX, HUD charge row, How-to-Play row, tutorial copy, Tempest oath dash bonus, sanctuary dash recharge).
+- Sanctuaries now reward **corruption cleanse + Nova recharge only**; Tempest oath accelerates Nova only.
+- Clarity pass: HUD objective block promoted to a clearer `GOAL` primary signal with progress + hint; enemy role marks use readable labels (`FAST` / `HEX` / `TANK`) instead of single-letter codes.
+- Early-fun pacing: objectives/interactables introduce from wave 3 on a 3-wave cadence; special enemy roles delayed (harrier 4 / hexer 6 / warden 8); early waves stay Nova + cleanse focused.
+- Ship hygiene: debug ingest instrumentation removed; README status/controls updated to the Nova-only combat identity; plan task marked Complete.
+
+**Logic explanation (why this approach):**
+
+- Dash competed with mouse-follow for input priority and added systems cost without enough unique decision value after Repel removal. Cutting it simplifies the verb set to **move → cleanse → Nova → interact**, which is easier to learn and polish for a jam/portfolio build.
+- Highest-ROI polish after ability cut is clarity + early pacing: players retain mastery of the core loop before goals, roles, and interactables stack cognitive load (Schell, 2008: lenses of clarity and progressive disclosure).
+- Documentation hygiene (README status/controls, plan, refinements) prevents reviewer/player trust loss from stale “Dash / Core Engine in Development” claims.
+
+**AI Collaboration Note:**
+
+- AI recommended sequencing ROI work as: remove underperforming Dash → update surface docs/controls → raise objective readability → delay secondary systems until wave 3+, rather than modularizing the monolith first.
+- AI suggested word labels over letter marks for roles because single letters required memorization under combat pressure.
+
+**References**
+
+Schell, J. 2008. *The Art of Game Design: A Book of Lenses*. Burlington, MA: Morgan Kaufmann.
+
+Swink, S. 2009. *Game Feel: A Game Designer's Guide to Virtual Sensation*. Burlington, MA: Morgan Kaufmann.
+
+---
+
+## Entry 019 — Runtime Performance Optimization Pass
+
+**Date:** 14 August 2026
+
+**Feature Added:** Implemented a runtime optimization pass in `game.js` focused on frame-time stability under heavy load. Changes include minimap caching/throttling, lighting darkness-layer caching, hot-loop distance math optimization (squared-distance checks), in-place array cleanup for trap sigils, particle pressure control via a soft cap, selective world-space culling for off-screen draws, and reduced blur-heavy draw calls for high-frequency effects.
+
+**Logic Explanation:**
+
+- **Minimap caching and throttling:** `drawMinimap()` now renders to an off-screen minimap cache canvas and blits it to the main canvas, refreshing every 2 frames (`MINIMAP_UPDATE_INTERVAL`). This reduces repeated per-frame projection object allocation and cuts draw-call volume in stress scenarios with many entities.
+- **Lighting base cache:** `drawLighting()` now caches the darkness fill layer and only rebuilds it when darkness alpha changes (`taintAlpha` changes). The runtime now reuses a pre-filled darkness canvas each frame and only applies dynamic light-hole punches, reducing full-surface fill overhead.
+- **Squared-distance checks in hot loops:** Frequent proximity checks in `Player.update()`, `Enemy.update()`, `TrapSigil.update()`, `CorruptionVent.update()`, `Hero.update()`, and corruption drain checks now use `dx*dx + dy*dy` for threshold comparisons. This removes avoidable `Math.hypot` calls where exact distance is not required.
+- **Lower allocation churn:** Replaced per-frame `trapSigils.filter(...)` with in-place reverse-splice cleanup and added a particle soft cap (`PARTICLE_SOFT_CAP`) to avoid runaway transient VFX growth during intense scenes.
+- **Render-cost trimming:** Removed an unnecessary full-canvas `clearRect` before background fill, reduced expensive `shadowBlur` usage on `Particle` and `ShockWave` rendering, and added conservative viewport culling for non-critical world entities before draw calls.
+- **HUD best-score cache:** HUD now reads a cached best-score snapshot (`bestCache`) instead of querying localStorage on every frame; cache refresh happens when best-score persistence is triggered.
+
+**AI Collaboration Note:** AI-guided profiling identified the dominant bottlenecks as per-frame compositing/blur work and allocation churn in repeated render loops. AI suggested prioritizing low-risk wins first (caching, throttling, squared-distance checks, and in-place cleanup) to improve stability without changing core mechanics or player-facing behavior.
+
+---
+
+## Entry 020 — Deadline Stability and Professional Polish Pass
+
+**Date:** 14 August 2026
+
+**Feature added:**
+
+- Reworked progression to a **mixed objective-gate model**:
+  - normal waves always advance on timer,
+  - milestone cycles (wave 10+) can require objective completion.
+- Removed the full **Repel mechanic** from runtime and UI (logic, input behavior, HUD rows, and help copy), focusing combat identity on Nova, Dash, and environment interactions.
+- Rebalanced early combat variety:
+  - enemy archetypes now appear earlier (`harrier` from wave 2, `hexer` wave 3, `warden` wave 4),
+  - role distribution is less wraith-dominant and role marks are more readable.
+- Upgraded readability and usability of interactables (`LightBeacon`, `TrapSigil`, `CorruptionVent`) with stronger emissive feedback, labels, and minimap signals.
+- Tuned lighting and HUD for professional readability:
+  - reduced baseline darkness pressure,
+  - added tactical light punch-through around interactables,
+  - rebuilt left HUD panel with row-based spacing and explicit objective hint/gate status.
+- Added HiDPI-safe canvas sizing (`devicePixelRatio`) and corrected mouse coordinate mapping via canvas bounds.
+
+**Logic Explanation:**
+
+- The prior hard objective gate stalled progression and indirectly hid enemy variety by trapping runs in low waves. Moving to mixed gating keeps pacing stable while preserving high-stakes objective moments at milestones.
+- Removing Repel eliminates an auto-fire layer that reduced intentional decision-making. Dash + Nova + tactical interactables now carry clearer player agency and readable risk/reward tradeoffs.
+- Dark fantasy readability was preserved by lowering ambient suppression while selectively highlighting objective-critical objects. This keeps tone while preventing navigation frustration.
+
+**AI Collaboration Note:**
+
+- AI recommended separating wave advancement reliability from objective reward flow, so objectives remain meaningful without deadlocking the run.
+- AI suggested replacing manual HUD offsets with a row-based vertical layout strategy to prevent recurring alignment regressions during feature growth.
+- AI suggested localized lighting punch-through around interactables as a low-cost alternative to removing the dark theme entirely.
+
+---
+
+## Entry 019 — Post-Playtest Purpose and Variety Expansion
+
+**Date:** 14 August 2026
+
+**Feature added:**
+
+- Implemented a rotating **Wave Objective System** (escort, seal, purge) that gates wave completion until objective success and awards objective rewards.
+- Added three enemy behavior archetypes inside the existing `Enemy` class role system:
+  - **Harrier** (player-pressure flank behavior),
+  - **Hexer** (ranged caster that fires `ShadowBolt` projectiles),
+  - **Warden** (tank-support behavior with anti-control aura pulses).
+- Added environmental interaction systems:
+  - **LightBeacon** (activate for sanctuary support),
+  - **TrapSigil** (prime then detonate on enemy proximity),
+  - **CorruptionVent** (periodically emits corruption until sealed by player).
+- Added progression and anti-repetition scaffolding:
+  - **Embers** resource from purification and objective play,
+  - **Store reroll** spend (`STORE_REROLL_COST`),
+  - **Objective relic tokens** that unlock an Oath path choice (`Purifier`, `Guardian`, `Tempest`) with differentiated build effects.
+- Added lore pacing hooks:
+  - objective and milestone lore lines,
+  - lore fragment tracking surfaced in the victory summary.
+- Updated HUD and onboarding copy to surface purpose-driven loop state (objective progress + embers + new interaction prompts).
+
+**Logic explanation (why this approach):**
+
+- The playtest issue was not baseline game feel quality, but **goal clarity and run-to-run shape**. Rotating objective states provide explicit wave intent, while objective gating ensures the new systems are not optional background noise.
+- Enemy archetypes were layered onto the existing monolithic architecture via a role parameter (instead of a full inheritance tree) to preserve jam velocity and minimize regression risk in shared combat code.
+- Interactables were designed as short dwell-time actions to preserve the current cursor-driven control fantasy while adding tactical trade-offs (do objective work now vs stabilize Hero pressure first).
+- Embers + reroll create immediate economic agency from score-adjacent play, and Oath paths provide mutually exclusive identity without rewriting the full upgrade stack.
+- Lore delivery was intentionally short-form and event-triggered to reinforce purpose between combat beats without disrupting pace.
+
+**AI Collaboration Note:**
+
+- AI proposed using a role-driven `Enemy` behavior branch rather than introducing multiple deep subclasses, which reduced integration cost across existing spawn, draw, and death pipelines.
+- AI suggested objective reward tokenization (store-integrated relic path unlock) as a low-friction way to convert objective success into strategic build decisions.
+- AI suggested tying light radius to purification capture range (bounded) to make lumen upgrades mechanically meaningful beyond visual fog clearing.
+
+**References**
+
+Schell, J. 2008. *The Art of Game Design: A Book of Lenses*. Burlington, MA: Morgan Kaufmann.
+
+Swink, S. 2009. *Game Feel: A Game Designer's Guide to Virtual Sensation*. Burlington, MA: Morgan Kaufmann.
+
+---
+
 ## Entry 017 — Lumen Dash Mechanic and Dynamic Boss Music
 
 **Date:** 26 March 2026
